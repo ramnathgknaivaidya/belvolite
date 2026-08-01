@@ -138,7 +138,7 @@ export default function ChatPage() {
             <input
               name="body"
               placeholder="Write a message..."
-              className="h-10 min-w-0 flex-1 rounded-[8px] border border-border bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className="h-10 min-w-0 flex-1 rounded-[8px] border border-border bg-white px-3 text-sm text-text-primary outline-none placeholder:text-text-tertiary focus:border-primary focus:ring-2 focus:ring-primary/20"
               required
             />
             <FormSubmitButton pendingLabel="Sending..." className="inline-flex h-10 items-center justify-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60">
