@@ -2140,6 +2140,30 @@ app.get("/api/admin/verification", authenticateToken, requireAdminRole, async (r
   }
 });
 
+app.post("/api/admin/verification/approve-all", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const { clientId } = req.body;
+    if (!clientId) {
+      return res.status(400).json({ success: false, message: "Choose a client to approve documents for" });
+    }
+    const db = await getDb();
+    const result = await db.collection("verification_documents").updateMany(
+      { client_id: String(clientId), status: "pending" },
+      { $set: { status: "approved", rejection_reason: null, verified_at: new Date().toISOString() } }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(400).json({ success: false, message: "This client has no pending documents to approve" });
+    }
+    res.json({ success: true, message: `${result.modifiedCount} document${result.modifiedCount === 1 ? "" : "s"} approved` });
+  } catch (err) {
+    console.error("POST /api/admin/verification/approve-all error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
 app.post("/api/admin/verification/:id", authenticateToken, requireAdminRole, async (req, res) => {
   try {
     if (!(await isDbReady())) {
@@ -2170,30 +2194,6 @@ app.post("/api/admin/verification/:id", authenticateToken, requireAdminRole, asy
     res.json({ success: true, message: `Document ${decision}` });
   } catch (err) {
     console.error("POST /api/admin/verification/:id error:", err);
-    res.status(500).json({ success: false, message: "Internal server error" });
-  }
-});
-
-app.post("/api/admin/verification/approve-all", authenticateToken, requireAdminRole, async (req, res) => {
-  try {
-    if (!(await isDbReady())) {
-      return res.status(503).json({ success: false, message: "Database not configured" });
-    }
-    const { clientId } = req.body;
-    if (!clientId) {
-      return res.status(400).json({ success: false, message: "Choose a client to approve documents for" });
-    }
-    const db = await getDb();
-    const result = await db.collection("verification_documents").updateMany(
-      { client_id: String(clientId), status: "pending" },
-      { $set: { status: "approved", rejection_reason: null, verified_at: new Date().toISOString() } }
-    );
-    if (result.matchedCount === 0) {
-      return res.status(400).json({ success: false, message: "This client has no pending documents to approve" });
-    }
-    res.json({ success: true, message: `${result.modifiedCount} document${result.modifiedCount === 1 ? "" : "s"} approved` });
-  } catch (err) {
-    console.error("POST /api/admin/verification/approve-all error:", err);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
