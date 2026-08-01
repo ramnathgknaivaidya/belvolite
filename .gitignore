@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.tsbuildinfo
+*.local
+vite-server.log
+.env
+.env.local
+.DS_Store
+Thumbs.db
+
+# Server
+server/server.log
+server/uploads/
+server/.env
