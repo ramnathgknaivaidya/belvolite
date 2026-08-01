@@ -59,25 +59,46 @@ export default function DocumentsPage() {
   const [milestones, setMilestones] = useState<MilestoneRecord[]>([]);
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const res = await fetch('/api/client/documents');
-        if (res.ok) {
-          const json = await res.json();
-          setDocuments(Array.isArray(json.data) ? json.data : []);
-          setProjects(Array.isArray(json.projects) ? json.projects : []);
-          setMilestones([]);
-          return;
-        }
-      } catch {
-        // leave empty on error
-      }
-      setDocuments([]);
-      setProjects([]);
-      setMilestones([]);
-    }
-    fetchData();
+    loadDocuments();
   }, []);
+
+  async function loadDocuments() {
+    try {
+      const res = await fetch('/api/client/documents');
+      if (res.ok) {
+        const json = await res.json();
+        setDocuments(Array.isArray(json.data) ? json.data : []);
+        setProjects(Array.isArray(json.projects) ? json.projects : []);
+        setMilestones([]);
+        return;
+      }
+    } catch {
+      // leave empty on error
+    }
+    setDocuments([]);
+    setProjects([]);
+    setMilestones([]);
+  }
+
+  async function uploadDocument(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/client/documents', { method: 'POST', body: fd });
+      const json = await res.json();
+      if (res.ok) {
+        event.currentTarget.reset();
+        setMessage(json.message || 'Document uploaded');
+        await loadDocuments();
+      } else {
+        setError(json.message || 'Failed to upload document');
+      }
+    } catch {
+      setError('Network error. Please try again.');
+    }
+  }
 
   return (
     <div className="animate-fade-in space-y-5">
@@ -106,7 +127,7 @@ export default function DocumentsPage() {
           </div>
         </div>
 
-        <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); console.log('submit', Object.fromEntries(fd)); }} className="grid gap-4 lg:grid-cols-[1fr_180px_1fr_1fr]">
+        <form onSubmit={uploadDocument} className="grid gap-4 lg:grid-cols-[1fr_180px_1fr_1fr]">
           <label className="space-y-1.5">
             <span className="text-xs font-medium text-text-secondary">Name</span>
             <input name="name" required className={inputClass()} />

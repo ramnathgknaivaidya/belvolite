@@ -18,7 +18,7 @@ const __dirname = path.dirname(__filename);
 
 import { TOOLS_CATALOG } from "../server/data/tools.js";
 import { authenticateToken, getJWTSecret, authLimiter, otpLimiter } from "../server/middleware/auth.js";
-import { getDb, isDbReady } from "../server/db.js";
+import { getDb, isDbReady, ObjectId } from "../server/db.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -991,6 +991,349 @@ app.get("/api/client/reports", authenticatePortal, async (req, res) => {
     } });
   } catch (err) {
     console.error("GET /api/client/reports error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.get("/api/client/meetings", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const meetings = await db.collection("meetings").find({ client_id: req.user.userId }).sort({ scheduled_at: -1 }).toArray();
+    res.json({ success: true, data: meetings.map(m => ({
+      id: m._id?.toString() || m.id,
+      clientId: m.client_id || req.user.userId,
+      title: m.title,
+      status: m.status || "upcoming",
+      scheduledAt: m.scheduled_at || null,
+      durationMinutes: Number(m.duration_minutes || 45),
+      agenda: m.agenda || null,
+      participants: m.participants || null,
+      meetingLink: m.meeting_link || null,
+      createdAt: m.created_at || null,
+    })) });
+  } catch (err) {
+    console.error("GET /api/client/meetings error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/client/meetings", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    const { title, date, time, durationMinutes, agenda, participants, meetingLink } = req.body;
+    if (!title || !date || !time) {
+      return res.status(400).json({ success: false, message: "Title, date, and time are required" });
+    }
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const scheduledAt = new Date(`${date}T${time}`).toISOString();
+    const doc = {
+      client_id: req.user.userId,
+      title: String(title),
+      status: "upcoming",
+      scheduled_at: scheduledAt,
+      duration_minutes: Number(durationMinutes || 45),
+      agenda: String(agenda || ""),
+      participants: String(participants || ""),
+      meeting_link: String(meetingLink || ""),
+      created_at: new Date().toISOString(),
+    };
+    const result = await db.collection("meetings").insertOne(doc);
+    res.status(201).json({ success: true, message: "Meeting requested", id: result.insertedId.toString() });
+  } catch (err) {
+    console.error("POST /api/client/meetings error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/client/meetings/:id/status", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    const { status } = req.body;
+    if (!["accepted", "cancelled", "completed"].includes(status)) {
+      return res.status(400).json({ success: false, message: "Invalid status" });
+    }
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const result = await db.collection("meetings").updateOne(
+      { _id: new ObjectId(req.params.id), client_id: req.user.userId },
+      { $set: { status } }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: "Meeting not found" });
+    }
+    res.json({ success: true, message: "Meeting updated" });
+  } catch (err) {
+    console.error("POST /api/client/meetings/:id/status error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.delete("/api/client/meetings/:id", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const result = await db.collection("meetings").deleteOne({ _id: new ObjectId(req.params.id), client_id: req.user.userId });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: "Meeting not found" });
+    }
+    res.json({ success: true, message: "Meeting deleted" });
+  } catch (err) {
+    console.error("DELETE /api/client/meetings/:id error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.get("/api/client/change-requests", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const requests = await db.collection("change_requests").find({ client_id: req.user.userId }).sort({ created_at: -1 }).toArray();
+    res.json({ success: true, data: requests.map(c => ({
+      id: c._id?.toString() || c.id,
+      title: c.title,
+      status: c.status || "pending",
+      impact: c.impact || "medium",
+      priority: c.priority || "medium",
+      description: c.description || "",
+      estimatedCost: Number(c.estimated_cost || 0),
+      projectName: c.project_name || null,
+      createdAt: c.created_at || null,
+      adminNote: c.admin_note || null,
+    })) });
+  } catch (err) {
+    console.error("GET /api/client/change-requests error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/client/change-requests", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    const { title, projectId, estimatedCost, impact, priority, timelineImpact, description } = req.body;
+    if (!title || !description) {
+      return res.status(400).json({ success: false, message: "Title and description are required" });
+    }
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    let projectName = null;
+    if (projectId) {
+      const project = await db.collection("projects").findOne({ _id: new ObjectId(projectId) }).catch(() => null);
+      if (project) projectName = project.name;
+    }
+    const doc = {
+      client_id: req.user.userId,
+      project_id: projectId || null,
+      project_name: projectName,
+      title: String(title),
+      description: String(description),
+      impact: impact || "medium",
+      priority: priority || "medium",
+      estimated_cost: Number(estimatedCost || 0),
+      timeline_impact: String(timelineImpact || ""),
+      status: "pending",
+      admin_note: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    await db.collection("change_requests").insertOne(doc);
+    res.status(201).json({ success: true, message: "Change request submitted" });
+  } catch (err) {
+    console.error("POST /api/client/change-requests error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/client/chat", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    const { body } = req.body;
+    if (!body || !String(body).trim()) {
+      return res.status(400).json({ success: false, message: "Message body is required" });
+    }
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const profile = await db.collection("profiles").findOne({ _id: new ObjectId(req.user.userId) }).catch(() => null);
+    const doc = {
+      client_id: req.user.userId,
+      sender_id: req.user.userId,
+      sender_name: profile?.full_name || "Client",
+      sender_role: "client",
+      body: String(body).trim(),
+      attachment_name: null,
+      attachment_url: null,
+      created_at: new Date().toISOString(),
+    };
+    await db.collection("portal_messages").insertOne(doc);
+    res.status(201).json({ success: true, message: "Message sent" });
+  } catch (err) {
+    console.error("POST /api/client/chat error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/client/documents", authenticatePortal, (req, res) => {
+  upload.single("file")(req, res, async (err) => {
+    try {
+      if (err) {
+        if (err instanceof multer.MulterError) {
+          return res.status(400).json({ success: false, message: err.code === "LIMIT_FILE_SIZE" ? "File too large. Max 5MB." : err.message });
+        }
+        return res.status(400).json({ success: false, message: err.message });
+      }
+      const { name, type, projectId, milestoneId } = req.body || {};
+      const file = req.file;
+      if (!file) {
+        return res.status(400).json({ success: false, message: "No file uploaded" });
+      }
+      if (!(await isDbReady())) {
+        return res.status(503).json({ success: false, message: "Database not configured" });
+      }
+      const db = await getDb();
+      let projectName = null;
+      if (projectId) {
+        const project = await db.collection("projects").findOne({ _id: new ObjectId(projectId) }).catch(() => null);
+        if (project) projectName = project.name;
+      }
+      let milestoneTitle = null;
+      if (milestoneId) {
+        const milestone = await db.collection("milestones").findOne({ _id: new ObjectId(milestoneId) }).catch(() => null);
+        if (milestone) milestoneTitle = milestone.title;
+      }
+      const doc = {
+        client_id: req.user.userId,
+        project_id: projectId || null,
+        project_name: projectName,
+        milestone_id: milestoneId || null,
+        milestone_title: milestoneTitle,
+        name: String(name || file.originalname),
+        type: String(type || "other"),
+        version: 1,
+        file_name: file.originalname,
+        file_path: `documents/${req.user.userId}/${file.filename}`,
+        file_url: `/uploads/${file.filename}`,
+        mime_type: file.mimetype,
+        file_size: file.size,
+        visible_to_client: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      await db.collection("project_documents").insertOne(doc);
+      res.status(201).json({ success: true, message: "Document uploaded" });
+    } catch (error) {
+      console.error("POST /api/client/documents error:", error);
+      res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+});
+
+app.get("/api/client/profile", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const profile = await db.collection("profiles").findOne({ _id: new ObjectId(req.user.userId) });
+    if (!profile) {
+      return res.status(404).json({ success: false, message: "Profile not found" });
+    }
+    res.json({ success: true, profile: {
+      id: profile._id.toString(),
+      fullName: profile.full_name || null,
+      company: profile.company || null,
+      email: profile.email,
+      phone: profile.phone || null,
+      gender: profile.gender || null,
+      age: profile.age != null ? Number(profile.age) : null,
+      website: profile.website || null,
+      instagram: profile.instagram || null,
+      linkedin: profile.linkedin || null,
+      street: profile.street || null,
+      city: profile.city || null,
+      state: profile.state || null,
+      postalCode: profile.postal_code || null,
+      country: profile.country || null,
+      gstNumber: profile.gst_number || null,
+      bpitNumber: profile.bpit_number || null,
+      emailNotifications: profile.email_notifications ?? true,
+      weeklySummary: profile.weekly_summary ?? false,
+      twoFactorEnabled: profile.two_factor_enabled ?? false,
+    } });
+  } catch (err) {
+    console.error("GET /api/client/profile error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.put("/api/client/profile", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    const fields = ["full_name", "company", "phone", "gender", "age", "website", "instagram", "linkedin", "street", "city", "state", "postal_code", "country", "gst_number", "bpit_number", "email_notifications", "weekly_summary", "two_factor_enabled"];
+    const allowed = ["fullName", "company", "phone", "gender", "age", "website", "instagram", "linkedin", "street", "city", "state", "postalCode", "country", "gstNumber", "bpitNumber", "emailNotifications", "weeklySummary", "twoFactorEnabled"];
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const update = {};
+    allowed.forEach((key, index) => {
+      if (req.body[key] !== undefined) {
+        update[fields[index]] = typeof req.body[key] === "boolean" ? req.body[key] : String(req.body[key]);
+      }
+    });
+    const db = await getDb();
+    await db.collection("profiles").updateOne({ _id: new ObjectId(req.user.userId) }, { $set: update });
+    res.json({ success: true, message: "Profile updated" });
+  } catch (err) {
+    console.error("PUT /api/client/profile error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/client/password", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: "Current and new passwords are required" });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ success: false, message: "New password must be at least 8 characters" });
+    }
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const profile = await db.collection("profiles").findOne({ _id: new ObjectId(req.user.userId) });
+    if (!profile) {
+      return res.status(404).json({ success: false, message: "Profile not found" });
+    }
+    const valid = await bcrypt.compare(currentPassword, profile.password_hash);
+    if (!valid) {
+      return res.status(401).json({ success: false, message: "Current password is incorrect" });
+    }
+    const password_hash = await bcrypt.hash(String(newPassword), 12);
+    await db.collection("profiles").updateOne({ _id: new ObjectId(req.user.userId) }, { $set: { password_hash } });
+    res.json({ success: true, message: "Password updated" });
+  } catch (err) {
+    console.error("POST /api/client/password error:", err);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });

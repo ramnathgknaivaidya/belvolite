@@ -46,32 +46,87 @@ function Checkbox({ name, label, description, defaultChecked }: { name: string; 
 
 export default function SettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState<any>(null);
 
   useEffect(() => {
-    const mockProfile = {
-      fullName: 'Rahul Sharma',
-      company: 'TechStart Inc.',
-      email: 'rahul@example.com',
-      phone: '+91 98765 43210',
-      gender: 'Male',
-      age: 32,
-      website: 'https://techstart.com',
-      instagram: '@rahulsharma',
-      linkedin: 'linkedin.com/company/techstart',
-      street: '42, MG Road, Indiranagar',
-      city: 'Bangalore',
-      state: 'Karnataka',
-      postalCode: '560038',
-      country: 'India',
-      gstNumber: '29ABCDE1234F1Z5',
-      bpitNumber: 'BPIT123456',
-      emailNotifications: true,
-      weeklySummary: false,
-      twoFactorEnabled: true,
-    };
-    setProfile(mockProfile);
+    async function loadProfile() {
+      try {
+        const res = await fetch('/api/client/profile');
+        if (res.ok) {
+          const json = await res.json();
+          setProfile(json.profile || {});
+          return;
+        }
+      } catch {
+        // fall through
+      }
+      setProfile({});
+    }
+    loadProfile();
   }, []);
+
+  async function saveProfile(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    setError(null);
+    setMessage(null);
+    const body: Record<string, string | boolean> = {};
+    fd.forEach((value, key) => {
+      if (key === 'email') return;
+      body[key] = value === 'on' ? true : String(value);
+    });
+    try {
+      const res = await fetch('/api/client/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setMessage(json.message || 'Profile updated');
+        const reload = await fetch('/api/client/profile');
+        if (reload.ok) {
+          const reloadJson = await reload.json();
+          setProfile(reloadJson.profile || {});
+        }
+      } else {
+        setError(json.message || 'Failed to save profile');
+      }
+    } catch {
+      setError('Network error. Please try again.');
+    }
+  }
+
+  async function changePassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    const currentPassword = String(fd.get('currentPassword') || '');
+    const newPassword = String(fd.get('newPassword') || '');
+    const confirmPassword = String(fd.get('confirmPassword') || '');
+    setError(null);
+    setMessage(null);
+    if (newPassword !== confirmPassword) {
+      setError('New password and confirm password do not match.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/client/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        event.currentTarget.reset();
+        setMessage(json.message || 'Password updated');
+      } else {
+        setError(json.message || 'Failed to update password');
+      }
+    } catch {
+      setError('Network error. Please try again.');
+    }
+  }
 
   if (!profile) {
     return <div className="animate-fade-in space-y-5"><p className="text-sm text-text-secondary">Loading...</p></div>;
@@ -84,9 +139,10 @@ export default function SettingsPage() {
         <p className="mt-1 text-sm text-text-secondary">Manage the real account details connected to your client profile.</p>
       </div>
 
-      {message && <p className="rounded-[8px] border border-primary/20 bg-primary-50 px-3 py-2 text-sm font-medium text-primary">{message}</p>}
+      {message && <p className="rounded-[8px] border border-success/20 bg-success-50 px-3 py-2 text-sm font-medium text-success">{message}</p>}
+      {error && <p className="rounded-[8px] border border-danger/20 bg-danger-50 px-3 py-2 text-sm font-medium text-danger">{error}</p>}
 
-      <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); console.log('submit', Object.fromEntries(fd)); }} className="space-y-5">
+      <form onSubmit={saveProfile} className="space-y-5">
         <section className="card p-4">
           <div className="mb-4 flex items-center gap-2 border-b border-border pb-3">
             <User size={16} className="text-text-secondary" />
@@ -163,7 +219,7 @@ export default function SettingsPage() {
           <Lock size={16} className="text-text-secondary" />
           <h2 className="text-sm font-semibold text-text-primary">Change Password</h2>
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); console.log('submit', Object.fromEntries(fd)); }} className="grid gap-4 sm:grid-cols-3">
+        <form onSubmit={changePassword} className="grid gap-4 sm:grid-cols-3">
           <Field label="Current password" name="currentPassword" type="password" />
           <Field label="New password" name="newPassword" type="password" />
           <Field label="Confirm password" name="confirmPassword" type="password" />

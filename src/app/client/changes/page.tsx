@@ -50,43 +50,64 @@ function inputClass(extra = '') {
 export default function ChangesPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [requests, setRequests] = useState<ChangeRequestRecord[]>([]);
+  const [requests, setRequests] = useState<ChangeRequestRecord[] | null>(null);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
 
+  async function loadRequests() {
+    try {
+      const res = await fetch('/api/client/change-requests');
+      if (res.ok) {
+        const json = await res.json();
+        setRequests(Array.isArray(json.data) ? json.data : []);
+      } else {
+        setRequests([]);
+      }
+    } catch {
+      setRequests([]);
+    }
+  }
+
   useEffect(() => {
-    const mockRequests: ChangeRequestRecord[] = [
-      {
-        id: 'mock-cr-1',
-        title: 'Add dark mode support',
-        status: 'pending',
-        impact: 'medium',
-        priority: 'medium',
-        description: 'We need to add dark mode support across all pages of the dashboard.',
-        estimatedCost: 50000,
-        projectName: 'Website Redesign',
-        createdAt: '2026-07-25T09:00:00.000Z',
-        adminNote: null,
-      },
-      {
-        id: 'mock-cr-2',
-        title: 'Extend payment deadline',
-        status: 'approved',
-        impact: 'low',
-        priority: 'high',
-        description: 'Requesting to extend the payment deadline for the current milestone by 2 weeks.',
-        estimatedCost: 0,
-        projectName: 'Mobile App',
-        createdAt: '2026-07-20T14:30:00.000Z',
-        adminNote: 'Approved. The new deadline is August 15, 2026.',
-      },
-    ];
-    const mockProjects: ProjectRecord[] = [
-      { id: 'mock-proj-1', name: 'Website Redesign' },
-      { id: 'mock-proj-2', name: 'Mobile App' },
-    ];
-    setRequests(mockRequests);
-    setProjects(mockProjects);
+    async function loadProjects() {
+      try {
+        const res = await fetch('/api/client/projects');
+        if (res.ok) {
+          const json = await res.json();
+          setProjects((Array.isArray(json.data) ? json.data : []).map((p: any) => ({ id: p.id, name: p.name })));
+        }
+      } catch {
+        setProjects([]);
+      }
+    }
+    loadRequests();
+    loadProjects();
   }, []);
+
+  async function submitRequest(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/client/change-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(fd)),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        event.currentTarget.reset();
+        setMessage(json.message || 'Change request submitted');
+        await loadRequests();
+      } else {
+        setError(json.message || 'Failed to submit request');
+      }
+    } catch {
+      setError('Network error. Please try again.');
+    }
+  }
+
+  if (!requests) return <div className="flex items-center justify-center h-64"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="animate-fade-in space-y-5">
@@ -115,7 +136,7 @@ export default function ChangesPage() {
             <p className="text-sm text-text-secondary">Describe the requested change and expected impact.</p>
           </div>
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); console.log('submit', Object.fromEntries(fd)); }} className="grid gap-4 lg:grid-cols-4">
+        <form onSubmit={submitRequest} className="grid gap-4 lg:grid-cols-4">
           <label className="space-y-1.5 lg:col-span-2">
             <span className="text-xs font-medium text-text-secondary">Title</span>
             <input name="title" required className={inputClass()} />

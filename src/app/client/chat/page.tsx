@@ -52,6 +52,36 @@ export default function ChatPage() {
     fetchData();
   }, []);
 
+  async function sendMessage(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    const body = String(fd.get('body') || '').trim();
+    if (!body) return;
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/client/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        event.currentTarget.reset();
+        setMessage(json.message || 'Message sent');
+        const chatRes = await fetch('/api/client/chat');
+        if (chatRes.ok) {
+          const data = await chatRes.json();
+          setMessages(Array.isArray(data.data) ? data.data : []);
+        }
+      } else {
+        setError(json.message || 'Failed to send message');
+      }
+    } catch {
+      setError('Network error. Please try again.');
+    }
+  }
+
   if (!messages) return <div className="flex items-center justify-center h-64"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>;
 
   return (
@@ -103,7 +133,7 @@ export default function ChatPage() {
           })}
         </div>
 
-        <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); console.log('submit', Object.fromEntries(fd)); }} className="border-t border-border p-4">
+        <form onSubmit={sendMessage} className="border-t border-border p-4">
           <div className="flex gap-2">
             <input
               name="body"

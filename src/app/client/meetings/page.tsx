@@ -42,33 +42,89 @@ function inputClass(extra = '') {
 export default function MeetingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [meetings, setMeetings] = useState<MeetingRecord[]>([]);
+  const [meetings, setMeetings] = useState<MeetingRecord[] | null>(null);
+
+  async function loadMeetings() {
+    try {
+      const res = await fetch('/api/client/meetings');
+      if (res.ok) {
+        const json = await res.json();
+        setMeetings(Array.isArray(json.data) ? json.data : []);
+        return;
+      }
+    } catch {
+      // fall through
+    }
+    setMeetings([]);
+  }
 
   useEffect(() => {
-    const mockMeetings: MeetingRecord[] = [
-      {
-        id: 'mock-meeting-1',
-        title: 'Sprint Review',
-        status: 'upcoming',
-        scheduledAt: '2026-08-05T10:00:00.000Z',
-        durationMinutes: 45,
-        agenda: 'Review sprint progress and demo new features.',
-        participants: 'rahul@example.com, admin@belvo.com',
-        meetingLink: 'https://meet.google.com/abc-defg-hij',
-      },
-      {
-        id: 'mock-meeting-2',
-        title: 'Project Kickoff',
-        status: 'accepted',
-        scheduledAt: '2026-07-28T14:30:00.000Z',
-        durationMinutes: 60,
-        agenda: 'Kickoff meeting for the new website redesign.',
-        participants: 'rahul@example.com, admin@belvo.com, designer@belvo.com',
-        meetingLink: null,
-      },
-    ];
-    setMeetings(mockMeetings);
+    loadMeetings();
   }, []);
+
+  async function submitCreate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/client/meetings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(fd)),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        event.currentTarget.reset();
+        setMessage(json.message || 'Meeting requested');
+        await loadMeetings();
+      } else {
+        setError(json.message || 'Failed to create meeting');
+      }
+    } catch {
+      setError('Network error. Please try again.');
+    }
+  }
+
+  async function updateStatus(id: string, status: string) {
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/client/meetings/${id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setMessage(json.message || 'Meeting updated');
+        await loadMeetings();
+      } else {
+        setError(json.message || 'Failed to update meeting');
+      }
+    } catch {
+      setError('Network error. Please try again.');
+    }
+  }
+
+  async function removeMeeting(id: string) {
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/client/meetings/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (res.ok) {
+        setMessage(json.message || 'Meeting deleted');
+        await loadMeetings();
+      } else {
+        setError(json.message || 'Failed to delete meeting');
+      }
+    } catch {
+      setError('Network error. Please try again.');
+    }
+  }
+
+  if (!meetings) return <div className="flex items-center justify-center h-64"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="animate-fade-in space-y-5">
@@ -92,7 +148,7 @@ export default function MeetingsPage() {
           <h2 className="text-base font-semibold text-text-primary">Schedule Meeting</h2>
           <p className="mt-1 text-sm text-text-secondary">Create a meeting request for the admin team.</p>
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); console.log('submit', Object.fromEntries(fd)); }} className="grid gap-4 lg:grid-cols-[1fr_140px_120px_140px]">
+        <form onSubmit={submitCreate} className="grid gap-4 lg:grid-cols-[1fr_140px_120px_140px]">
           <label className="space-y-1.5">
             <span className="text-xs font-medium text-text-secondary">Title</span>
             <input name="title" required className={inputClass()} />
@@ -161,32 +217,33 @@ export default function MeetingsPage() {
                   </a>
                 )}
                 {meeting.status === 'upcoming' && (
-                  <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); console.log('submit', Object.fromEntries(fd)); }}>
-                    <input type="hidden" name="id" value={meeting.id} />
-                    <input type="hidden" name="status" value="accepted" />
-                    <FormSubmitButton pendingLabel="Accepting..." className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-success/20 bg-success-50 px-3 text-sm font-semibold text-success hover:bg-success/10">
-                      <CheckCircle2 size={14} />
-                      Accept
-                    </FormSubmitButton>
-                  </form>
+                  <button
+                    type="button"
+                    onClick={() => updateStatus(meeting.id, 'accepted')}
+                    className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-success/20 bg-success-50 px-3 text-sm font-semibold text-success hover:bg-success/10"
+                  >
+                    <CheckCircle2 size={14} />
+                    Accept
+                  </button>
                 )}
-                {meeting.status !== 'cancelled' && (
-                  <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); console.log('submit', Object.fromEntries(fd)); }}>
-                    <input type="hidden" name="id" value={meeting.id} />
-                    <input type="hidden" name="status" value="cancelled" />
-                    <FormSubmitButton pendingLabel="Cancelling..." className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-danger/20 bg-danger-50 px-3 text-sm font-semibold text-danger hover:bg-danger/10">
-                      <XCircle size={14} />
-                      Cancel
-                    </FormSubmitButton>
-                  </form>
+                {meeting.status !== 'cancelled' && meeting.status !== 'completed' && (
+                  <button
+                    type="button"
+                    onClick={() => updateStatus(meeting.id, 'cancelled')}
+                    className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-danger/20 bg-danger-50 px-3 text-sm font-semibold text-danger hover:bg-danger/10"
+                  >
+                    <XCircle size={14} />
+                    Cancel
+                  </button>
                 )}
-                <form onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); console.log('submit', Object.fromEntries(fd)); }}>
-                  <input type="hidden" name="id" value={meeting.id} />
-                  <FormSubmitButton pendingLabel="Deleting..." className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-border bg-white px-3 text-sm font-semibold text-text-secondary hover:bg-surface-tertiary">
-                    <Trash2 size={14} />
-                    Delete
-                  </FormSubmitButton>
-                </form>
+                <button
+                  type="button"
+                  onClick={() => removeMeeting(meeting.id)}
+                  className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-border bg-white px-3 text-sm font-semibold text-text-secondary hover:bg-surface-tertiary"
+                >
+                  <Trash2 size={14} />
+                  Delete
+                </button>
               </div>
             </div>
           </Card>
