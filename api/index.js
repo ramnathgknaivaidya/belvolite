@@ -708,6 +708,118 @@ app.get("/api/client/dashboard", authenticatePortal, async (req, res) => {
   }
 });
 
+function requireClient(req, res) {
+  if (req.user.role !== "client") {
+    res.status(403).json({ success: false, message: "Access denied" });
+    return false;
+  }
+  return true;
+}
+
+app.get("/api/client/projects", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const projects = await db.collection("projects").find({ client_id: req.user.userId, visible_to_client: true }).sort({ expected_completion: 1 }).toArray();
+    res.json({ success: true, data: projects.map(p => ({
+      id: p._id?.toString() || p.id,
+      name: p.name,
+      health: p.health || "good",
+      status: p.status || "not_started",
+      description: p.description || null,
+      progress: p.progress || 0,
+      expectedCompletion: p.expected_completion || null,
+      budget: Number(p.budget || 0),
+      spent: Number(p.spent || 0),
+      projectManager: p.project_manager || null,
+      milestonesCount: Number(p.milestones_count || 0),
+      documentsCount: Number(p.documents_count || 0),
+      changeRequestsCount: Number(p.change_requests_count || 0),
+    })) });
+  } catch (err) {
+    console.error("GET /api/client/projects error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.get("/api/client/milestones", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const milestones = await db.collection("milestones").find({ client_id: req.user.userId }).sort({ expected_date: 1 }).toArray();
+    res.json({ success: true, data: milestones.map(m => ({
+      id: m._id?.toString() || m.id,
+      projectId: m.project_id || null,
+      projectName: m.project_name || null,
+      title: m.title,
+      status: m.status || "not_started",
+      description: m.description || null,
+      progress: m.progress || 0,
+      expectedDate: m.expected_date || null,
+      completionDate: m.completion_date || null,
+      deliverables: m.deliverables || [],
+    })) });
+  } catch (err) {
+    console.error("GET /api/client/milestones error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.get("/api/client/verification", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const documents = await db.collection("verification_documents").find({ client_id: req.user.userId }).sort({ created_at: -1 }).toArray();
+    res.json({ success: true, data: documents.map(d => ({
+      id: d._id?.toString() || d.id,
+      documentType: d.document_type,
+      status: d.status || "pending",
+      fileName: d.file_name || null,
+      createdAt: d.created_at || null,
+      documentNumber: d.document_number || null,
+      rejectionReason: d.rejection_reason || null,
+      fileUrl: d.file_url || null,
+    })) });
+  } catch (err) {
+    console.error("GET /api/client/verification error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.get("/api/client/timeline", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const events = await db.collection("timeline_events").find({ client_id: req.user.userId, visible_to_client: true }).sort({ event_date: -1 }).toArray();
+    res.json({ success: true, data: events.map(e => ({
+      id: e._id?.toString() || e.id,
+      clientId: e.client_id || req.user.userId,
+      title: e.title,
+      description: e.description || null,
+      type: e.type || "update",
+      eventDate: e.event_date || e.created_at,
+      status: e.status || "upcoming",
+      visibleToClient: true,
+      createdAt: e.created_at || e.event_date || null,
+    })) });
+  } catch (err) {
+    console.error("GET /api/client/timeline error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
 const EVENT_TITLES = {
   1: "React Free Webinar",
   2: "Flutter Workshop",
