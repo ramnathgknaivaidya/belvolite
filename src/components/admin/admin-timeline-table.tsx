@@ -2,17 +2,18 @@
 
 import { useMemo, useState } from 'react';
 import { CalendarRange, Eye, EyeOff, Plus, Sparkles, Trash2 } from 'lucide-react';
-import { createTimelineEventAction, deleteTimelineEventAction, updateTimelineEventAction } from '@/lib/admin-actions';
 import {
+  createTimelineEvent,
+  deleteTimelineEvent,
+  updateTimelineEvent,
   timelineEventStatuses,
   timelineEventTypes,
   type AdminClientRecord,
   type AdminTimelineEventRecord,
-  type TimelineEventStatusValue,
-  type TimelineEventTypeValue,
-} from '@/lib/portal-data';
+  type TimelineEventStatus,
+  type TimelineEventType,
+} from '@/lib/admin-portal-api';
 import { Drawer } from '@/components/ui/slide-panel';
-import { FormSubmitButton } from '@/components/ui/form-submit-button';
 
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -22,13 +23,13 @@ function toDateTimeLocal(value: string) {
   return value.slice(0, 16);
 }
 
-function statusBadge(status: TimelineEventStatusValue) {
+function statusBadge(status: TimelineEventStatus) {
   if (status === 'completed') return 'badge-green';
   if (status === 'upcoming') return 'badge-orange';
   return 'badge-gray';
 }
 
-function typeBadge(type: TimelineEventTypeValue) {
+function typeBadge(type: TimelineEventType) {
   if (type === 'milestone' || type === 'update') return 'badge-purple';
   if (type === 'meeting') return 'badge-green';
   if (type === 'payment') return 'badge-orange';
@@ -43,10 +44,62 @@ function textareaClass() {
   return 'min-h-24 w-full rounded-[8px] border border-border bg-white px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20';
 }
 
-function TimelineForm({ event, clients }: { event?: AdminTimelineEventRecord; clients: AdminClientRecord[] }) {
+function TimelineForm({
+  event,
+  clients,
+  onSaved,
+  onError,
+}: {
+  event?: AdminTimelineEventRecord;
+  clients: AdminClientRecord[];
+  onSaved: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleSubmit(formEvent: React.FormEvent<HTMLFormElement>) {
+    formEvent.preventDefault();
+    const fd = new FormData(formEvent.currentTarget);
+    setSaving(true);
+    try {
+      const payload = {
+        clientId: fd.get('clientId') as string,
+        title: fd.get('title') as string,
+        description: (fd.get('description') as string) || null,
+        type: (fd.get('type') as string) as TimelineEventType,
+        status: (fd.get('status') as string) as TimelineEventStatus,
+        eventDate: fd.get('eventDate') as string,
+        visibleToClient: fd.get('visibleToClient') === 'on',
+      };
+      if (event) {
+        await updateTimelineEvent(event.id, payload);
+      } else {
+        await createTimelineEvent(payload);
+      }
+      await onSaved();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to save timeline event');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!event) return;
+    setDeleting(true);
+    try {
+      await deleteTimelineEvent(event.id);
+      await onSaved();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to delete timeline event');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
-    <form action={event ? updateTimelineEventAction : createTimelineEventAction} className="space-y-4">
-      {event && <input type="hidden" name="id" value={event.id} />}
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         <label className="space-y-1.5 md:col-span-2">
           <span className="text-xs font-medium text-text-secondary">Client</span>
@@ -75,7 +128,7 @@ function TimelineForm({ event, clients }: { event?: AdminTimelineEventRecord; cl
         </label>
         <label className="space-y-1.5 md:col-span-2">
           <span className="text-xs font-medium text-text-secondary">Event date</span>
-          <input name="eventDate" required type="datetime-local" defaultValue={event ? toDateTimeLocal(event.eventDate) : ''} className={inputClass()} />
+          <input name="eventDate" required type="datetime-local" defaultValue={event ? toDateTimeLocal(event.eventDate ?? '') : ''} className={inputClass()} />
         </label>
         <label className="space-y-1.5 md:col-span-2">
           <span className="text-xs font-medium text-text-secondary">Description</span>
@@ -88,14 +141,19 @@ function TimelineForm({ event, clients }: { event?: AdminTimelineEventRecord; cl
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         {event && (
-          <FormSubmitButton formAction={deleteTimelineEventAction} pendingLabel="Deleting..." className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-danger/20 bg-danger-50 px-3.5 text-sm font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60">
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deleting}
+            className="inline-flex h-9 items-center gap-1.5 rounded-[8px] border border-danger/20 bg-danger-50 px-3.5 text-sm font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
+          >
             <Trash2 size={14} />
-            Delete
-          </FormSubmitButton>
+            {deleting ? 'Deleting...' : 'Delete'}
+          </button>
         )}
-        <FormSubmitButton pendingLabel={event ? 'Saving...' : 'Creating...'} disabled={!event && clients.length === 0} className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50">
-          {event ? 'Save event' : 'Create event'}
-        </FormSubmitButton>
+        <button type="submit" disabled={saving || (!event && clients.length === 0)} className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50">
+          {saving ? (event ? 'Saving...' : 'Creating...') : (event ? 'Save event' : 'Create event')}
+        </button>
       </div>
     </form>
   );
@@ -105,32 +163,32 @@ const quickTemplates = [
   {
     title: 'Discovery call completed',
     description: 'Initial discovery discussion is complete. Requirements, goals, and next steps have been captured for planning.',
-    type: 'meeting' as TimelineEventTypeValue,
-    status: 'completed' as TimelineEventStatusValue,
+    type: 'meeting' as TimelineEventType,
+    status: 'completed' as TimelineEventStatus,
   },
   {
     title: 'Documents received',
     description: 'Required onboarding documents have been received and are under review by the Belvo team.',
-    type: 'document' as TimelineEventTypeValue,
-    status: 'completed' as TimelineEventStatusValue,
+    type: 'document' as TimelineEventType,
+    status: 'completed' as TimelineEventStatus,
   },
   {
     title: 'Payment requested',
     description: 'A payment request has been created for the next project milestone. Please complete payment from the Payments page.',
-    type: 'payment' as TimelineEventTypeValue,
-    status: 'upcoming' as TimelineEventStatusValue,
+    type: 'payment' as TimelineEventType,
+    status: 'upcoming' as TimelineEventStatus,
   },
   {
     title: 'Design review scheduled',
     description: 'A design review session has been scheduled to review direction, feedback, and approval checkpoints.',
-    type: 'meeting' as TimelineEventTypeValue,
-    status: 'upcoming' as TimelineEventStatusValue,
+    type: 'meeting' as TimelineEventType,
+    status: 'upcoming' as TimelineEventStatus,
   },
   {
     title: 'First draft delivery',
     description: 'The first working draft is scheduled for client review. Feedback from this round will guide final revisions.',
-    type: 'milestone' as TimelineEventTypeValue,
-    status: 'upcoming' as TimelineEventStatusValue,
+    type: 'milestone' as TimelineEventType,
+    status: 'upcoming' as TimelineEventStatus,
   },
 ];
 
@@ -141,9 +199,39 @@ function defaultEventDate(offsetDays: number) {
   return date.toISOString().slice(0, 16);
 }
 
-function QuickTemplates({ clients }: { clients: AdminClientRecord[] }) {
+function QuickTemplates({
+  clients,
+  onSaved,
+  onError,
+}: {
+  clients: AdminClientRecord[];
+  onSaved: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
   const [clientId, setClientId] = useState(clients[0]?.id ?? '');
   const [eventDate, setEventDate] = useState(defaultEventDate(1));
+  const [adding, setAdding] = useState<string | null>(null);
+
+  async function handleAdd(template: (typeof quickTemplates)[number]) {
+    if (!clientId || !eventDate) return;
+    setAdding(template.title);
+    try {
+      await createTimelineEvent({
+        clientId,
+        title: template.title,
+        description: template.description,
+        type: template.type,
+        status: template.status,
+        eventDate,
+        visibleToClient: true,
+      });
+      await onSaved();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to add timeline event');
+    } finally {
+      setAdding(null);
+    }
+  }
 
   return (
     <section className="card p-4">
@@ -177,37 +265,50 @@ function QuickTemplates({ clients }: { clients: AdminClientRecord[] }) {
 
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
         {quickTemplates.map((template) => (
-          <form key={template.title} action={createTimelineEventAction} className="rounded-[8px] border border-border bg-white p-3">
-            <input type="hidden" name="clientId" value={clientId} />
-            <input type="hidden" name="title" value={template.title} />
-            <input type="hidden" name="description" value={template.description} />
-            <input type="hidden" name="type" value={template.type} />
-            <input type="hidden" name="status" value={template.status} />
-            <input type="hidden" name="eventDate" value={eventDate} />
-            <input type="hidden" name="visibleToClient" value="on" />
+          <div key={template.title} className="rounded-[8px] border border-border bg-white p-3">
             <p className="text-sm font-semibold text-text-primary">{template.title}</p>
             <p className="mt-1 line-clamp-2 min-h-8 text-xs text-text-secondary">{template.description}</p>
             <div className="mt-3 flex items-center justify-between gap-2">
               <span className={`badge ${typeBadge(template.type)}`}>{template.type}</span>
-              <FormSubmitButton pendingLabel="Adding..." disabled={!clientId || !eventDate} className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[8px] bg-primary px-3 text-xs font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50">
-                Add
-              </FormSubmitButton>
+              <button
+                type="button"
+                onClick={() => handleAdd(template)}
+                disabled={!clientId || !eventDate || adding !== null}
+                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[8px] bg-primary px-3 text-xs font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {adding === template.title ? 'Adding...' : 'Add'}
+              </button>
             </div>
-          </form>
+          </div>
         ))}
       </div>
     </section>
   );
 }
 
-export function AdminTimelineTable({ events, clients }: { events: AdminTimelineEventRecord[]; clients: AdminClientRecord[] }) {
+export function AdminTimelineTable({
+  events,
+  clients,
+  onMessage,
+  onRefresh,
+}: {
+  events: AdminTimelineEventRecord[];
+  clients: AdminClientRecord[];
+  onMessage: (message: string, isError?: boolean) => void;
+  onRefresh: () => Promise<void>;
+}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedEvent = useMemo(() => events.find((event) => event.id === selectedId), [events, selectedId]);
   const creating = selectedId === 'new';
 
+  async function handleSaved() {
+    await onRefresh();
+    onMessage('Timeline event saved.');
+  }
+
   return (
     <>
-      <QuickTemplates clients={clients} />
+      <QuickTemplates clients={clients} onSaved={handleSaved} onError={(m) => onMessage(m, true)} />
 
       <section className="card overflow-hidden p-0">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -258,7 +359,7 @@ export function AdminTimelineTable({ events, clients }: { events: AdminTimelineE
                       {event.visibleToClient ? 'visible' : 'hidden'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-text-secondary">{formatDateTime(event.eventDate)}</td>
+                  <td className="px-4 py-3 text-text-secondary">{formatDateTime(event.eventDate ?? '')}</td>
                 </tr>
               ))}
             </tbody>
@@ -269,10 +370,10 @@ export function AdminTimelineTable({ events, clients }: { events: AdminTimelineE
       <Drawer
         open={creating || Boolean(selectedEvent)}
         title={creating ? 'Create Timeline Event' : selectedEvent?.title ?? 'Timeline event'}
-        description={creating ? 'Add a client-visible or internal timeline entry.' : selectedEvent ? `${selectedEvent.clientName} - ${formatDateTime(selectedEvent.eventDate)}` : undefined}
+        description={creating ? 'Add a client-visible or internal timeline entry.' : selectedEvent ? `${selectedEvent.clientName} - ${formatDateTime(selectedEvent.eventDate ?? '')}` : undefined}
         onClose={() => setSelectedId(null)}
       >
-        <TimelineForm event={selectedEvent} clients={clients} />
+        <TimelineForm event={selectedEvent} clients={clients} onSaved={handleSaved} onError={(m) => onMessage(m, true)} />
       </Drawer>
     </>
   );

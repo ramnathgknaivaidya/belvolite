@@ -1,18 +1,12 @@
+'use client';
+
 import { CalendarDays, CheckCircle2, Clock, Trash2, XCircle } from 'lucide-react';
 import { Badge, Card, StatCard } from '@/components/ui/shared';
-import { FormSubmitButton } from '@/components/ui/form-submit-button';
-import { requireRole } from '@/lib/auth';
-import { getAdminClients, getAdminMeetings, meetingStatuses, type MeetingRecord } from '@/lib/portal-data';
-import { createAdminMeetingAction, deleteMeetingAction, updateMeetingStatusAction } from '@/lib/workspace-actions';
+import { fetchClients, fetchMeetings, createMeeting, updateMeetingStatus, deleteMeeting, meetingStatuses, type AdminClientRecord, type MeetingRecord, type MeetingStatus } from '@/lib/admin-portal-api';
+import { useState, useEffect } from 'react';
 
-type SearchParams = Record<string, string | string[] | undefined>;
-
-function firstParam(params: SearchParams, key: string) {
-  const value = params[key];
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function formatDateTime(value: string) {
+function formatDateTime(value: string | null) {
+  if (!value) return 'Not scheduled';
   return new Date(value).toLocaleString('en-IN', {
     day: 'numeric',
     month: 'short',
@@ -22,7 +16,7 @@ function formatDateTime(value: string) {
   });
 }
 
-function statusVariant(status: MeetingRecord['status']): 'purple' | 'green' | 'red' | 'gray' {
+function statusVariant(status: MeetingStatus): 'purple' | 'green' | 'red' | 'gray' {
   if (status === 'accepted') return 'green';
   if (status === 'cancelled') return 'red';
   if (status === 'completed') return 'gray';
@@ -33,12 +27,81 @@ function inputClass(extra = '') {
   return `h-9 w-full rounded-[8px] border border-border bg-white px-3 text-sm text-text-primary outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 ${extra}`;
 }
 
-export default async function AdminMeetingsPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
-  await requireRole('admin');
-  const params = searchParams ? await searchParams : {};
-  const message = firstParam(params, 'message');
-  const error = firstParam(params, 'error');
-  const [clients, meetings] = await Promise.all([getAdminClients(), getAdminMeetings()]);
+export default function AdminMeetingsPage() {
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [clients, setClients] = useState<AdminClientRecord[]>([]);
+  const [meetings, setMeetings] = useState<MeetingRecord[] | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function loadData() {
+    try {
+      const [clientData, meetingData] = await Promise.all([fetchClients(), fetchMeetings()]);
+      setClients(clientData);
+      setMeetings(meetingData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load meetings');
+      setMeetings([]);
+    }
+  }
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  async function submitCreate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    setError(null);
+    setMessage(null);
+    setSaving(true);
+    try {
+      await createMeeting({
+        clientId: fd.get('clientId') as string,
+        title: fd.get('title') as string,
+        date: fd.get('date') as string,
+        time: fd.get('time') as string,
+        durationMinutes: Number(fd.get('durationMinutes') || 45),
+        agenda: (fd.get('agenda') as string) || undefined,
+        participants: (fd.get('participants') as string) || undefined,
+        meetingLink: (fd.get('meetingLink') as string) || undefined,
+        status: (fd.get('status') as MeetingStatus) || undefined,
+      });
+      event.currentTarget.reset();
+      setMessage('Meeting created.');
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create meeting');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function updateStatus(id: string, status: MeetingStatus) {
+    setError(null);
+    setMessage(null);
+    try {
+      await updateMeetingStatus(id, status);
+      setMessage('Meeting status updated.');
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update meeting');
+    }
+  }
+
+  async function removeMeeting(id: string) {
+    setError(null);
+    setMessage(null);
+    try {
+      await deleteMeeting(id);
+      setMessage('Meeting deleted.');
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete meeting');
+    }
+  }
+
+  if (!meetings) return <div className="flex items-center justify-center h-64"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="animate-fade-in space-y-5">
@@ -62,7 +125,7 @@ export default async function AdminMeetingsPage({ searchParams }: { searchParams
           <h3 className="text-base font-semibold text-text-primary">Create Meeting</h3>
           <p className="mt-1 text-sm text-text-secondary">Choose a client and add the meeting details.</p>
         </div>
-        <form action={createAdminMeetingAction} className="grid gap-4 lg:grid-cols-[1fr_1fr_140px_120px_140px]">
+        <form onSubmit={submitCreate} className="grid gap-4 lg:grid-cols-[1fr_1fr_140px_120px_140px]">
           <label className="space-y-1.5">
             <span className="text-xs font-medium text-text-secondary">Client</span>
             <select name="clientId" required defaultValue="" className={inputClass()}>
@@ -107,9 +170,9 @@ export default async function AdminMeetingsPage({ searchParams }: { searchParams
             </select>
           </label>
           <div className="lg:col-span-5">
-            <FormSubmitButton pendingLabel="Creating..." disabled={clients.length === 0} className="inline-flex h-9 items-center justify-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60">
-              Create Meeting
-            </FormSubmitButton>
+            <button type="submit" disabled={saving || clients.length === 0} className="inline-flex h-9 items-center justify-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60">
+              {saving ? 'Creating...' : 'Create Meeting'}
+            </button>
           </div>
         </form>
       </Card>
@@ -129,40 +192,41 @@ export default async function AdminMeetingsPage({ searchParams }: { searchParams
                   <h4 className="font-semibold text-text-primary">{meeting.title}</h4>
                   <Badge variant={statusVariant(meeting.status)}>{meeting.status}</Badge>
                 </div>
-                <p className="mt-1 text-sm text-text-secondary">{meeting.clientName} - {meeting.clientEmail}</p>
+                <p className="mt-1 text-sm text-text-secondary">{meeting.clientName || meeting.clientEmail || 'Unknown client'} - {meeting.clientEmail}</p>
                 <p className="mt-1 line-clamp-1 text-sm text-text-secondary">{meeting.agenda || 'No agenda provided.'}</p>
               </div>
               <div className="text-sm text-text-secondary">
                 <p className="font-medium text-text-primary">{formatDateTime(meeting.scheduledAt)}</p>
                 <p className="mt-1">{meeting.durationMinutes} min</p>
               </div>
-              <form action={updateMeetingStatusAction}>
-                <input type="hidden" name="id" value={meeting.id} />
-                <select name="status" defaultValue={meeting.status} className={inputClass()}>
+              <div>
+                <select
+                  value={meeting.status}
+                  onChange={(e) => updateStatus(meeting.id, e.target.value as MeetingStatus)}
+                  className={inputClass()}
+                >
                   {meetingStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
                 </select>
-                <FormSubmitButton pendingLabel="Saving..." className="mt-2 inline-flex h-8 items-center rounded-[8px] bg-primary px-3 text-xs font-semibold text-white hover:bg-primary-600">
-                  Save
-                </FormSubmitButton>
-              </form>
+              </div>
               <div className="flex flex-wrap gap-2 lg:justify-end">
                 {meeting.status !== 'completed' && (
-                  <form action={updateMeetingStatusAction}>
-                    <input type="hidden" name="id" value={meeting.id} />
-                    <input type="hidden" name="status" value="completed" />
-                    <FormSubmitButton pendingLabel="Completing..." className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-success/20 bg-success-50 px-3 text-sm font-semibold text-success hover:bg-success/10">
-                      <CheckCircle2 size={14} />
-                      Complete
-                    </FormSubmitButton>
-                  </form>
+                  <button
+                    type="button"
+                    onClick={() => updateStatus(meeting.id, 'completed')}
+                    className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-success/20 bg-success-50 px-3 text-sm font-semibold text-success hover:bg-success/10"
+                  >
+                    <CheckCircle2 size={14} />
+                    Complete
+                  </button>
                 )}
-                <form action={deleteMeetingAction}>
-                  <input type="hidden" name="id" value={meeting.id} />
-                  <FormSubmitButton pendingLabel="Deleting..." className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-border bg-white px-3 text-sm font-semibold text-text-secondary hover:bg-surface-tertiary">
-                    <Trash2 size={14} />
-                    Delete
-                  </FormSubmitButton>
-                </form>
+                <button
+                  type="button"
+                  onClick={() => removeMeeting(meeting.id)}
+                  className="inline-flex h-9 items-center gap-2 rounded-[8px] border border-border bg-white px-3 text-sm font-semibold text-text-secondary hover:bg-surface-tertiary"
+                >
+                  <Trash2 size={14} />
+                  Delete
+                </button>
               </div>
             </article>
           ))}

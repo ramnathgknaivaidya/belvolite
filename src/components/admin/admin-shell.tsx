@@ -44,15 +44,13 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AdminUser | null>(null);
 
   useEffect(() => {
-    async function loadProfile() {
+    const token = localStorage.getItem('belvo_admin_token');
+    if (token) {
       try {
-        const response = await fetch('/api/auth/me');
-        if (!response.ok) return;
-        const data = await response.json() as { user: { fullName: string | null; email: string } };
-        setUser(data.user);
+        const payload = JSON.parse(atob(token.split('.')[1])) as { username?: string; role?: string };
+        setUser({ email: payload.username || 'Admin', fullName: payload.username || null });
       } catch {}
     }
-    void loadProfile();
   }, []);
 
   useEffect(() => {
@@ -70,11 +68,9 @@ export function AdminShell({ children }: { children: ReactNode }) {
 
   const navigating = navigationTarget !== null && navigationTarget !== pathname;
 
-  async function signOut() {
-    try {
-      await fetch('/api/auth/logout', { method: 'POST' });
-    } catch {}
-    navigate('/');
+  function signOut() {
+    localStorage.removeItem('belvo_admin_token');
+    navigate('/admin/login');
     window.location.reload();
   }
 

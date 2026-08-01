@@ -2,17 +2,19 @@
 
 import { useMemo, useState } from 'react';
 import { CreditCard, ExternalLink, ImageIcon, Plus, QrCode } from 'lucide-react';
-import { cancelPaymentAction, createPaymentAction, updatePaymentAction, updatePaymentSettingsAction } from '@/lib/admin-actions';
 import {
+  cancelPayment,
+  createPayment,
+  updatePayment,
+  savePaymentSettings,
   paymentStatuses,
   type AdminClientRecord,
   type AdminPaymentRecord,
   type PaymentSettingsRecord,
-  type PaymentStatusValue,
-} from '@/lib/portal-data';
+  type PaymentStatus,
+} from '@/lib/admin-portal-api';
 import { DEFAULT_CURRENCY, PAYMENT_AMOUNT_MAX, formatCurrency } from '@/lib/money';
 import { Drawer } from '@/components/ui/slide-panel';
-import { FormSubmitButton } from '@/components/ui/form-submit-button';
 
 function formatDate(value: string | null) {
   if (!value) return 'No due date';
@@ -23,7 +25,7 @@ function toDateTimeLocal(value: string | null) {
   return value ? value.slice(0, 16) : '';
 }
 
-function statusBadge(status: PaymentStatusValue) {
+function statusBadge(status: PaymentStatus) {
   if (status === 'paid') return 'badge-green';
   if (status === 'pending') return 'badge-orange';
   if (status === 'overdue') return 'badge-red';
@@ -37,15 +39,70 @@ function inputClass(extra = '') {
 function PaymentForm({
   payment,
   clients,
+  onSaved,
+  onError,
 }: {
   payment?: AdminPaymentRecord;
   clients: AdminClientRecord[];
+  onSaved: () => Promise<void>;
+  onError: (message: string) => void;
 }) {
-  const action = payment ? updatePaymentAction : createPaymentAction;
+  const [saving, setSaving] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    setSaving(true);
+    try {
+      const status = (fd.get('status') as string) as PaymentStatus;
+      const dueDate = (fd.get('dueDate') as string) || null;
+      const paidAt = (fd.get('paidAt') as string) || null;
+      if (payment) {
+        await updatePayment(payment.id, {
+          title: fd.get('title') as string,
+          amount: Number(fd.get('amount')),
+          currency: (fd.get('currency') as string) || DEFAULT_CURRENCY,
+          status,
+          dueDate,
+          paidAt,
+          notes: (fd.get('notes') as string) || null,
+        });
+      } else {
+        await createPayment({
+          clientId: fd.get('clientId') as string,
+          title: fd.get('title') as string,
+          amount: Number(fd.get('amount')),
+          currency: (fd.get('currency') as string) || DEFAULT_CURRENCY,
+          status,
+          dueDate,
+          paidAt,
+          notes: (fd.get('notes') as string) || null,
+        });
+      }
+      await onSaved();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to save payment');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCancel() {
+    if (!payment) return;
+    setCancelling(true);
+    try {
+      await cancelPayment(payment.id);
+      await onSaved();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to cancel payment');
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   return (
-    <form action={action} className="space-y-4">
-      {payment && <input type="hidden" name="id" value={payment.id} />}
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         {!payment && (
           <label className="space-y-1.5 md:col-span-2">
@@ -91,19 +148,52 @@ function PaymentForm({
       </div>
       <div className="flex justify-end gap-2 border-t border-border pt-4">
         {payment && payment.status !== 'cancelled' && (
-          <FormSubmitButton formAction={cancelPaymentAction} pendingLabel="Cancelling..." className="inline-flex h-9 items-center justify-center gap-2 rounded-[8px] border border-danger/20 bg-danger-50 px-3.5 text-sm font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60">
-            Cancel payment
-          </FormSubmitButton>
+          <button
+            type="button"
+            onClick={handleCancel}
+            disabled={cancelling}
+            className="inline-flex h-9 items-center justify-center gap-2 rounded-[8px] border border-danger/20 bg-danger-50 px-3.5 text-sm font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {cancelling ? 'Cancelling...' : 'Cancel payment'}
+          </button>
         )}
-        <FormSubmitButton pendingLabel={payment ? 'Saving...' : 'Creating...'} disabled={!payment && clients.length === 0} className="inline-flex h-9 items-center justify-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50">
-          {payment ? 'Save payment' : 'Create payment'}
-        </FormSubmitButton>
+        <button type="submit" disabled={saving || (!payment && clients.length === 0)} className="inline-flex h-9 items-center justify-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50">
+          {saving ? (payment ? 'Saving...' : 'Creating...') : (payment ? 'Save payment' : 'Create payment')}
+        </button>
       </div>
     </form>
   );
 }
 
-function PaymentSettingsPanel({ paymentSettings }: { paymentSettings: PaymentSettingsRecord }) {
+function PaymentSettingsPanel({
+  paymentSettings,
+  onSaved,
+  onError,
+}: {
+  paymentSettings: PaymentSettingsRecord;
+  onSaved: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const fd = new FormData(event.currentTarget);
+    setSaving(true);
+    try {
+      await savePaymentSettings({
+        upiId: fd.get('upiId') as string,
+        receiverName: (fd.get('receiverName') as string) || undefined,
+        qrCode: (fd.get('qrCode') as File)?.size ? (fd.get('qrCode') as File) : undefined,
+      });
+      await onSaved();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to save payment settings');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <section className="card p-4">
       <div className="mb-4 flex items-start gap-3">
@@ -112,11 +202,11 @@ function PaymentSettingsPanel({ paymentSettings }: { paymentSettings: PaymentSet
         </div>
         <div>
           <h3 className="text-sm font-semibold text-text-primary">UPI Payment Settings</h3>
-          <p className="mt-0.5 text-xs text-text-secondary">Shown to clients when they click Pay. QR uploads are stored in Supabase Storage.</p>
+          <p className="mt-0.5 text-xs text-text-secondary">Shown to clients when they click Pay. QR uploads are image files only, max 5MB.</p>
         </div>
       </div>
 
-      <form action={updatePaymentSettingsAction} className="grid gap-4 lg:grid-cols-[1fr_1fr_220px_auto]">
+      <form onSubmit={handleSubmit} className="grid gap-4 lg:grid-cols-[1fr_1fr_220px_auto]">
         <label className="space-y-1.5">
           <span className="text-xs font-medium text-text-secondary">UPI ID</span>
           <input name="upiId" defaultValue={paymentSettings.upiId ?? ''} placeholder="example@upi" required className={inputClass()} />
@@ -130,9 +220,9 @@ function PaymentSettingsPanel({ paymentSettings }: { paymentSettings: PaymentSet
           <input name="qrCode" type="file" accept="image/png,image/jpeg,image/webp" className="block w-full text-xs text-text-secondary file:mr-2 file:h-9 file:rounded-[8px] file:border-0 file:bg-surface-tertiary file:px-3 file:text-xs file:font-semibold file:text-text-primary hover:file:bg-primary-50" />
         </label>
         <div className="flex items-end">
-          <FormSubmitButton pendingLabel="Saving..." className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50">
-            Save UPI
-          </FormSubmitButton>
+          <button type="submit" disabled={saving} className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50">
+            {saving ? 'Saving...' : 'Save UPI'}
+          </button>
         </div>
       </form>
 
@@ -221,18 +311,27 @@ export function AdminPaymentsTable({
   payments,
   clients,
   paymentSettings,
+  onMessage,
+  onRefresh,
 }: {
   payments: AdminPaymentRecord[];
   clients: AdminClientRecord[];
   paymentSettings: PaymentSettingsRecord;
+  onMessage: (message: string, isError?: boolean) => void;
+  onRefresh: () => Promise<void>;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedPayment = useMemo(() => payments.find((payment) => payment.id === selectedId), [payments, selectedId]);
   const creating = selectedId === 'new';
 
+  async function handleSaved() {
+    await onRefresh();
+    onMessage('Payment saved.');
+  }
+
   return (
     <>
-      <PaymentSettingsPanel paymentSettings={paymentSettings} />
+      <PaymentSettingsPanel paymentSettings={paymentSettings} onSaved={onRefresh} onError={(m) => onMessage(m, true)} />
 
       <section className="card overflow-hidden p-0">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -261,7 +360,7 @@ export function AdminPaymentsTable({
             <tbody>
               {payments.length === 0 ? (
                 <tr>
-                  <td className="px-4 py-10 text-center text-text-secondary" colSpan={6}>
+                  <td className="px-4 py-10 text-center text-text-secondary" colSpan={7}>
                     <CreditCard className="mx-auto mb-2 text-text-tertiary" size={22} />
                     No payments found.
                   </td>
@@ -305,7 +404,7 @@ export function AdminPaymentsTable({
       >
         <div className="space-y-5">
           {!creating && <PaymentProofs payment={selectedPayment} />}
-          <PaymentForm payment={selectedPayment} clients={clients} />
+          <PaymentForm payment={selectedPayment} clients={clients} onSaved={handleSaved} onError={(m) => onMessage(m, true)} />
         </div>
       </Drawer>
     </>

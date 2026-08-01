@@ -1,7 +1,10 @@
-import Link from 'next/link';
+'use client';
+
+import { Link } from 'wouter';
 import { AlertTriangle, CalendarRange, Clock, CreditCard, UsersRound } from 'lucide-react';
-import { getAdminDashboardData } from '@/lib/portal-data';
+import { fetchAdminDashboard, type AdminDashboardData } from '@/lib/admin-portal-api';
 import { formatCurrency } from '@/lib/money';
+import { useEffect, useState } from 'react';
 
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -14,8 +17,15 @@ function badgeClass(status: string) {
   return 'badge-gray';
 }
 
-export default async function AdminDashboardPage() {
-  const data = await getAdminDashboardData();
+export default function AdminDashboardPage() {
+  const [data, setData] = useState<AdminDashboardData | null>(null);
+
+  useEffect(() => {
+    fetchAdminDashboard().then(setData).catch(() => setData(null));
+  }, []);
+
+  if (!data) return <div className="flex items-center justify-center h-64"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>;
+
   const stats = [
     { label: 'Total clients', value: String(data.totalClients), icon: <UsersRound size={18} />, tone: 'text-primary' },
     { label: 'Pending payments', value: String(data.pendingPayments), icon: <Clock size={18} />, tone: 'text-warning' },
@@ -91,7 +101,7 @@ export default async function AdminDashboardPage() {
                     <p className="truncate text-sm font-medium text-text-primary">{event.title}</p>
                     <span className={`badge ${badgeClass(event.status)}`}>{event.status}</span>
                   </div>
-                  <p className="mt-0.5 text-xs text-text-secondary">{event.clientName} - {formatDate(event.eventDate)}</p>
+                  <p className="mt-0.5 text-xs text-text-secondary">{event.clientName} - {formatDate(event.eventDate ?? '')}</p>
                 </div>
               </div>
             ))}

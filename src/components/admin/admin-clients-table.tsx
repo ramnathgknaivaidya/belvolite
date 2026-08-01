@@ -2,12 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import { Mail, Pencil, Trash2, UserRound } from 'lucide-react';
-import { updateAdminClientProfileAction } from '@/lib/profile-actions';
-import { deleteClientAction } from '@/lib/admin-actions';
-import type { AdminClientRecord, AdminPaymentRecord, AdminTimelineEventRecord } from '@/lib/portal-data';
+import { updateClientProfile, deleteClient, type AdminClientRecord, type AdminPaymentRecord, type AdminTimelineEventRecord } from '@/lib/admin-portal-api';
 import { formatCurrency } from '@/lib/money';
 import { Drawer } from '@/components/ui/slide-panel';
-import { FormSubmitButton } from '@/components/ui/form-submit-button';
 
 function formatDate(value: string | null) {
   if (!value) return 'Not set';
@@ -31,18 +28,73 @@ function ClientDrawerContent({
   client,
   payments,
   timeline,
+  onMessage,
+  onRefresh,
 }: {
   client: AdminClientRecord;
   payments: AdminPaymentRecord[];
   timeline: AdminTimelineEventRecord[];
+  onMessage: (message: string, isError?: boolean) => void;
+  onRefresh: () => Promise<void>;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmEmail, setConfirmEmail] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const canDelete = confirmEmail.trim().toLowerCase() === client.email.toLowerCase();
 
   const outstanding = payments
     .filter((payment) => payment.status === 'pending' || payment.status === 'overdue')
     .reduce((sum, payment) => sum + payment.amount, 0);
+
+  async function handleSave(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const fd = new FormData(event.currentTarget);
+      const profile: Record<string, string | number | boolean | null> = {
+        fullName: (fd.get('fullName') as string) || null,
+        company: (fd.get('company') as string) || null,
+        phone: (fd.get('phone') as string) || null,
+        gender: (fd.get('gender') as string) || null,
+        age: (fd.get('age') as string) ? Number(fd.get('age')) : null,
+        website: (fd.get('website') as string) || null,
+        instagram: (fd.get('instagram') as string) || null,
+        linkedin: (fd.get('linkedin') as string) || null,
+        street: (fd.get('street') as string) || null,
+        city: (fd.get('city') as string) || null,
+        state: (fd.get('state') as string) || null,
+        postalCode: (fd.get('postalCode') as string) || null,
+        country: (fd.get('country') as string) || null,
+        gstNumber: (fd.get('gstNumber') as string) || null,
+        bpitNumber: (fd.get('bpitNumber') as string) || null,
+        emailNotifications: fd.get('emailNotifications') === 'on',
+        weeklySummary: fd.get('weeklySummary') === 'on',
+        twoFactorEnabled: fd.get('twoFactorEnabled') === 'on',
+      };
+      await updateClientProfile(client.id, profile);
+      onMessage('Client profile updated.');
+      await onRefresh();
+    } catch (err) {
+      onMessage(err instanceof Error ? err.message : 'Failed to update client', true);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await deleteClient(client.id);
+      setConfirmingDelete(false);
+      await onRefresh();
+      onMessage('Client deleted.');
+    } catch (err) {
+      onMessage(err instanceof Error ? err.message : 'Failed to delete client', true);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -61,8 +113,7 @@ function ClientDrawerContent({
         </div>
       </div>
 
-      <form action={updateAdminClientProfileAction} className="space-y-4">
-        <input type="hidden" name="clientId" value={client.id} />
+      <form onSubmit={handleSave} className="space-y-4">
         <section className="space-y-3">
           <h3 className="text-sm font-semibold text-text-primary">Profile</h3>
           <div className="grid gap-4 lg:grid-cols-3">
@@ -109,9 +160,9 @@ function ClientDrawerContent({
         </section>
 
         <div className="flex justify-end border-t border-border pt-4">
-          <FormSubmitButton pendingLabel="Saving..." className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50">
-            Save client
-          </FormSubmitButton>
+          <button type="submit" disabled={saving} className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-medium text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-50">
+            {saving ? 'Saving...' : 'Save client'}
+          </button>
         </div>
       </form>
 
@@ -126,9 +177,7 @@ function ClientDrawerContent({
             Delete client
           </button>
         ) : (
-          <form action={deleteClientAction} className="space-y-3">
-            <input type="hidden" name="clientId" value={client.id} />
-            <input type="hidden" name="confirmEmail" value={confirmEmail} />
+          <div className="space-y-3">
             <p className="text-sm font-medium text-red-600">
               Type <span className="font-bold">{client.email}</span> to confirm:
             </p>
@@ -147,16 +196,17 @@ function ClientDrawerContent({
               >
                 Cancel
               </button>
-              <FormSubmitButton
-                pendingLabel="Deleting..."
-                disabled={!canDelete}
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={!canDelete || deleting}
                 className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-red-600 px-4 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Trash2 size={14} />
-                Confirm delete
-              </FormSubmitButton>
+                {deleting ? 'Deleting...' : 'Confirm delete'}
+              </button>
             </div>
-          </form>
+          </div>
         )}
       </div>
 
@@ -226,10 +276,14 @@ export function AdminClientsTable({
   clients,
   payments,
   timeline,
+  onMessage,
+  onRefresh,
 }: {
   clients: AdminClientRecord[];
   payments: AdminPaymentRecord[];
   timeline: AdminTimelineEventRecord[];
+  onMessage: (message: string, isError?: boolean) => void;
+  onRefresh: () => Promise<void>;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selectedClient = useMemo(() => clients.find((client) => client.id === selectedId), [clients, selectedId]);
@@ -301,7 +355,13 @@ export function AdminClientsTable({
         onClose={() => setSelectedId(null)}
       >
         {selectedClient && (
-          <ClientDrawerContent client={selectedClient} payments={selectedPayments} timeline={selectedTimeline} />
+          <ClientDrawerContent
+            client={selectedClient}
+            payments={selectedPayments}
+            timeline={selectedTimeline}
+            onMessage={onMessage}
+            onRefresh={onRefresh}
+          />
         )}
       </Drawer>
     </>

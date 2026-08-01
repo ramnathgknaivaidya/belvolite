@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 export interface TeamMember {
   id: number;
@@ -88,7 +88,7 @@ async function api<T>(
 // ── Auth API ───────────────────────────────────────────
 
 export async function login(username: string, password: string): Promise<string> {
-  const data = await api<{ success: boolean; token: string }>("/admin/login", {
+  const data = await api<{ success: boolean; token: string }>("/api/admin/login", {
     method: "POST",
     body: JSON.stringify({ username, password }),
   });

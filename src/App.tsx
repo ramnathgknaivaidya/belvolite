@@ -55,6 +55,16 @@ import ClientSettingsPage from "@/app/client/settings/page";
 import ClientLoginPage from "@/app/client/login/page";
 import ClientSignupPage from "@/app/client/signup/page";
 
+// Admin portal imports
+import { AdminShell } from "@/components/admin/admin-shell";
+import AdminDashboardPage from "@/app/admin/dashboard/page";
+import AdminClientsPage from "@/app/admin/clients/page";
+import AdminPaymentsPage from "@/app/admin/payments/page";
+import AdminMeetingsPage from "@/app/admin/meetings/page";
+import AdminTimelinePage from "@/app/admin/timeline/page";
+import AdminVerificationPage from "@/app/admin/verification/page";
+import AdminSettingsPage from "@/app/admin/settings/page";
+
 const queryClient = new QueryClient();
 
 const pageVariants = {
@@ -81,8 +91,28 @@ function Router() {
       >
         <Switch>
           <Route path="/admin/login" component={AdminLogin} />
-          <Route path="/admin">
+          <Route path="/admin/team">
             {isAuthenticated() ? <AdminDashboard /> : <Redirect to="/admin/login" />}
+          </Route>
+          <Route path="/admin">
+            {isAuthenticated() ? (
+              <AdminShell>
+                <Switch>
+                  <Route path="/admin/dashboard" component={AdminDashboardPage} />
+                  <Route path="/admin/clients" component={AdminClientsPage} />
+                  <Route path="/admin/payments" component={AdminPaymentsPage} />
+                  <Route path="/admin/meetings" component={AdminMeetingsPage} />
+                  <Route path="/admin/timeline" component={AdminTimelinePage} />
+                  <Route path="/admin/verification" component={AdminVerificationPage} />
+                  <Route path="/admin/settings" component={AdminSettingsPage} />
+                  <Route>
+                    <Redirect to="/admin/dashboard" />
+                  </Route>
+                </Switch>
+              </AdminShell>
+            ) : (
+              <Redirect to="/admin/login" />
+            )}
           </Route>
         </Switch>
       </div>

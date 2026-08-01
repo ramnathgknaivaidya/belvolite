@@ -15,7 +15,7 @@ import {
   type Department,
 } from "@/lib/admin-api";
 
-const IMG_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const IMG_BASE = import.meta.env.VITE_API_URL || "";
 
 const imageModules = import.meta.glob("/src/collectives/*", { eager: true, import: "default" }) as Record<string, string>;
 const IMAGE_MAP: Record<string, string> = {};

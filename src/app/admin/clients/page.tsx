@@ -1,23 +1,38 @@
-import Link from 'next/link';
+'use client';
+
+import { Link } from 'wouter';
 import { AdminClientsTable } from '@/components/admin/admin-clients-table';
-import { getAdminClients, getAdminPayments, getAdminTimelineEvents } from '@/lib/portal-data';
+import { fetchClients, fetchPayments, fetchTimeline, type AdminClientRecord, type AdminPaymentRecord, type AdminTimelineEventRecord } from '@/lib/admin-portal-api';
+import { useEffect, useState } from 'react';
 
-type SearchParams = Record<string, string | string[] | undefined>;
+export default function AdminClientsPage() {
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [clients, setClients] = useState<AdminClientRecord[] | null>(null);
+  const [payments, setPayments] = useState<AdminPaymentRecord[]>([]);
+  const [timeline, setTimeline] = useState<AdminTimelineEventRecord[]>([]);
 
-function firstParam(params: SearchParams, key: string) {
-  const value = params[key];
-  return Array.isArray(value) ? value[0] : value;
-}
+  async function refresh() {
+    try {
+      const [clientData, paymentData, timelineData] = await Promise.all([
+        fetchClients(),
+        fetchPayments(),
+        fetchTimeline(),
+      ]);
+      setClients(clientData);
+      setPayments(paymentData);
+      setTimeline(timelineData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load clients');
+      setClients([]);
+    }
+  }
 
-export default async function AdminClientsPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
-  const params = searchParams ? await searchParams : {};
-  const message = firstParam(params, 'message');
+  useEffect(() => {
+    refresh();
+  }, []);
 
-  const [clients, payments, timeline] = await Promise.all([
-    getAdminClients(),
-    getAdminPayments(),
-    getAdminTimelineEvents(),
-  ]);
+  if (clients === null) return <div className="flex items-center justify-center h-64"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="animate-fade-in space-y-5">
@@ -33,8 +48,15 @@ export default async function AdminClientsPage({ searchParams }: { searchParams?
       </div>
 
       {message && <p className="rounded-[8px] border border-primary/20 bg-primary-50 px-3 py-2 text-sm font-medium text-primary">{message}</p>}
+      {error && <p className="rounded-[8px] border border-danger/20 bg-danger-50 px-3 py-2 text-sm font-medium text-danger">{error}</p>}
 
-      <AdminClientsTable clients={clients} payments={payments} timeline={timeline} />
+      <AdminClientsTable
+        clients={clients}
+        payments={payments}
+        timeline={timeline}
+        onMessage={(m, isError) => { setError(null); if (isError) setError(m); else setMessage(m); }}
+        onRefresh={refresh}
+      />
     </div>
   );
 }

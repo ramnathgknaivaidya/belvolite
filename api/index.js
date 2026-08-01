@@ -91,6 +91,23 @@ app.post("/admin/login", authLimiter, async (req, res) => {
   }
 });
 
+app.post("/api/admin/login", authLimiter, async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: "Username and password are required" });
+    }
+    if (username !== ADMIN_USERNAME || password !== ADMIN_PASSWORD) {
+      return res.status(401).json({ success: false, message: "Invalid credentials" });
+    }
+    const token = jwt.sign({ username, role: "admin" }, getJWTSecret(), { expiresIn: "7d" });
+    res.json({ success: true, token });
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
 const ALLOWED_INTERN_EMAIL = process.env.ALLOWED_INTERN_EMAIL;
 
 app.post("/intern/send-otp", otpLimiter, async (req, res) => {
@@ -332,7 +349,7 @@ app.get("/api/team", async (req, res) => {
     }
     const db = await getDb();
     const members = await db.collection("team_members").find({}).sort({ sort_order: 1, name: 1 }).toArray();
-    res.json({ success: true, members });
+    res.json({ success: true, members: members.map((m) => ({ ...m, id: m._id?.toString() || m.id })) });
   } catch (err) {
     console.error("GET /api/team error:", err);
     res.status(500).json({ success: false, message: "Failed to fetch team members" });
@@ -1448,6 +1465,736 @@ app.post("/api/book-call", async (req, res) => {
   } catch (err) {
     console.error("POST /api/book-call error:", err);
     res.status(500).json({ success: false, message: "Failed to save submission" });
+  }
+});
+
+function requireAdminRole(req, res, next) {
+  if (!req.user || req.user.role !== "admin") {
+    return res.status(403).json({ success: false, message: "Admin access required" });
+  }
+  next();
+}
+
+const PAYMENT_STATUSES = ["pending", "paid", "overdue", "cancelled"];
+const TIMELINE_TYPES = ["milestone", "meeting", "payment", "document", "update"];
+const TIMELINE_STATUSES = ["upcoming", "completed", "cancelled"];
+const MEETING_STATUSES = ["upcoming", "accepted", "completed", "cancelled"];
+
+function adminClientLabel(profile) {
+  return profile?.full_name || profile?.fullName || profile?.email || "Client";
+}
+
+function mapAdminClient(doc) {
+  return {
+    id: doc._id?.toString() || doc.id,
+    email: doc.email,
+    fullName: doc.full_name || doc.fullName || null,
+    company: doc.company || null,
+    phone: doc.phone || null,
+    gender: doc.gender || null,
+    age: doc.age != null ? Number(doc.age) : null,
+    website: doc.website || null,
+    instagram: doc.instagram || null,
+    linkedin: doc.linkedin || null,
+    street: doc.street || null,
+    city: doc.city || null,
+    state: doc.state || null,
+    postalCode: doc.postal_code || doc.postalCode || null,
+    country: doc.country || null,
+    gstNumber: doc.gst_number || doc.gstNumber || null,
+    bpitNumber: doc.bpit_number || doc.bpitNumber || null,
+    emailNotifications: doc.email_notifications ?? doc.emailNotifications ?? true,
+    weeklySummary: doc.weekly_summary ?? doc.weeklySummary ?? false,
+    twoFactorEnabled: doc.two_factor_enabled ?? doc.twoFactorEnabled ?? false,
+    createdAt: doc.created_at || doc.createdAt || null,
+    paymentsCount: Number(doc.paymentsCount ?? doc.payments_count ?? 0),
+    timelineEventsCount: Number(doc.timelineEventsCount ?? doc.timeline_events_count ?? 0),
+  };
+}
+
+function mapAdminPayment(doc, client) {
+  return {
+    id: doc._id?.toString() || doc.id,
+    clientId: doc.client_id?.toString() || doc.clientId || null,
+    clientName: adminClientLabel(client || doc.client || {}),
+    clientEmail: client?.email || doc.client_email || doc.clientEmail || "",
+    title: doc.title || doc.invoice_number || "Payment",
+    amount: Number(doc.amount || 0),
+    currency: doc.currency || "INR",
+    status: doc.status || "pending",
+    dueDate: doc.due_date || doc.dueDate || null,
+    paidAt: doc.paid_at || doc.paidAt || null,
+    notes: doc.notes || null,
+    createdAt: doc.created_at || doc.createdAt || null,
+    proofs: (doc.proofs || []).map((proof) => ({
+      id: proof._id?.toString() || proof.id || `proof-${Math.random().toString(36).slice(2)}`,
+      paymentId: doc._id?.toString() || doc.id,
+      fileName: proof.file_name || proof.fileName || "proof",
+      filePath: proof.file_path || proof.filePath || null,
+      fileUrl: proof.file_url || proof.fileUrl || null,
+      mimeType: proof.mime_type || proof.mimeType || null,
+      fileSize: proof.file_size != null ? Number(proof.file_size) : null,
+      createdAt: proof.created_at || proof.createdAt || null,
+    })),
+  };
+}
+
+function mapAdminTimelineEvent(doc, client) {
+  return {
+    id: doc._id?.toString() || doc.id,
+    clientId: doc.client_id?.toString() || doc.clientId || null,
+    clientName: adminClientLabel(client || doc.client || {}),
+    clientEmail: client?.email || doc.client_email || doc.clientEmail || "",
+    title: doc.title,
+    description: doc.description || null,
+    type: doc.type || "update",
+    eventDate: doc.event_date || doc.eventDate || doc.created_at || null,
+    status: doc.status || "upcoming",
+    visibleToClient: doc.visible_to_client ?? doc.visibleToClient ?? true,
+    createdAt: doc.created_at || doc.createdAt || null,
+  };
+}
+
+function mapMeeting(doc, client) {
+  return {
+    id: doc._id?.toString() || doc.id,
+    clientId: doc.client_id?.toString() || doc.clientId || null,
+    clientName: client ? adminClientLabel(client) : doc.client_name || doc.clientName || undefined,
+    clientEmail: client?.email || doc.client_email || doc.clientEmail || undefined,
+    title: doc.title,
+    agenda: doc.agenda || null,
+    scheduledAt: doc.scheduled_at || doc.scheduledAt || null,
+    durationMinutes: Number(doc.duration_minutes || doc.durationMinutes || 45),
+    participants: doc.participants || null,
+    meetingLink: doc.meeting_link || doc.meetingLink || null,
+    status: doc.status || "upcoming",
+    createdAt: doc.created_at || doc.createdAt || null,
+  };
+}
+
+function mapVerificationDocument(doc, client) {
+  return {
+    id: doc._id?.toString() || doc.id,
+    clientId: doc.client_id?.toString() || doc.clientId || null,
+    clientName: client ? adminClientLabel(client) : doc.client_name || doc.clientName || undefined,
+    clientEmail: client?.email || doc.client_email || doc.clientEmail || undefined,
+    documentType: doc.document_type || doc.documentType || "other",
+    documentNumber: doc.document_number || doc.documentNumber || null,
+    fileName: doc.file_name || doc.fileName || "document",
+    filePath: doc.file_path || doc.filePath || null,
+    fileUrl: doc.file_url || doc.fileUrl || null,
+    mimeType: doc.mime_type || doc.mimeType || null,
+    fileSize: doc.file_size != null ? Number(doc.file_size) : null,
+    status: doc.status || "pending",
+    rejectionReason: doc.rejection_reason || doc.rejectionReason || null,
+    verifiedAt: doc.verified_at || doc.verifiedAt || null,
+    createdAt: doc.created_at || doc.createdAt || null,
+  };
+}
+
+function mapPaymentSettings(doc) {
+  return {
+    upiId: doc?.upi_id || doc?.upiId || null,
+    receiverName: doc?.receiver_name || doc?.receiverName || null,
+    qrCodePath: doc?.qr_code_path || doc?.qrCodePath || null,
+    qrCodeUrl: doc?.qr_code_url || doc?.qrCodeUrl || null,
+    updatedAt: doc?.updated_at || doc?.updatedAt || null,
+  };
+}
+
+// ── Admin: dashboard ──────────────────────────────────────────────
+
+app.get("/api/admin/dashboard", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const [totalClients, pendingPayments, overduePayments, payments, recentPaymentsDocs, recentTimelineDocs] = await Promise.all([
+      db.collection("profiles").countDocuments({ role: "client" }),
+      db.collection("payments").countDocuments({ status: "pending" }),
+      db.collection("payments").countDocuments({ status: "overdue" }),
+      db.collection("payments").find({ status: { $in: ["pending", "overdue"] } }).toArray(),
+      db.collection("payments").find({}).sort({ created_at: -1 }).limit(5).toArray(),
+      db.collection("timeline_events").find({}).sort({ event_date: -1 }).limit(5).toArray(),
+    ]);
+    const outstandingAmount = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+    const recentPayments = await Promise.all(recentPaymentsDocs.map(async (p) => {
+      const client = p.client_id ? await db.collection("profiles").findOne({ _id: new ObjectId(p.client_id) }).catch(() => null) : null;
+      return mapAdminPayment(p, client);
+    }));
+    const recentTimelineEvents = await Promise.all(recentTimelineDocs.map(async (e) => {
+      const client = e.client_id ? await db.collection("profiles").findOne({ _id: new ObjectId(e.client_id) }).catch(() => null) : null;
+      return mapAdminTimelineEvent(e, client);
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        totalClients,
+        pendingPayments,
+        overduePayments,
+        outstandingAmount,
+        timelineEvents: recentTimelineDocs.length,
+        recentPayments,
+        recentTimelineEvents,
+      },
+    });
+  } catch (err) {
+    console.error("GET /api/admin/dashboard error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// ── Admin: clients ─────────────────────────────────────────────────
+
+app.get("/api/admin/clients", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const docs = await db.collection("profiles").aggregate([
+      { $match: { role: "client" } },
+      { $sort: { created_at: -1 } },
+      {
+        $lookup: {
+          from: "payments",
+          localField: "_id",
+          foreignField: "client_id",
+          as: "_payments",
+        },
+      },
+      {
+        $lookup: {
+          from: "timeline_events",
+          localField: "_id",
+          foreignField: "client_id",
+          as: "_timeline",
+        },
+      },
+    ]).toArray();
+    res.json({ success: true, data: docs.map((d) => ({
+      ...mapAdminClient(d),
+      paymentsCount: d._payments?.length || 0,
+      timelineEventsCount: d._timeline?.length || 0,
+    })) });
+  } catch (err) {
+    console.error("GET /api/admin/clients error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.put("/api/admin/clients/:id", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const existing = await db.collection("profiles").findOne({ _id: new ObjectId(req.params.id), role: "client" });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Client not found" });
+    }
+    const fields = ["full_name", "company", "phone", "gender", "age", "website", "instagram", "linkedin", "street", "city", "state", "postal_code", "country", "gst_number", "bpit_number", "email_notifications", "weekly_summary", "two_factor_enabled"];
+    const allowed = ["fullName", "company", "phone", "gender", "age", "website", "instagram", "linkedin", "street", "city", "state", "postalCode", "country", "gstNumber", "bpitNumber", "emailNotifications", "weeklySummary", "twoFactorEnabled"];
+    const update = {};
+    allowed.forEach((key, index) => {
+      if (req.body[key] !== undefined) {
+        update[fields[index]] = typeof req.body[key] === "boolean" ? req.body[key] : String(req.body[key]);
+      }
+    });
+    update.updated_at = new Date().toISOString();
+    await db.collection("profiles").updateOne({ _id: existing._id }, { $set: update });
+    res.json({ success: true, message: "Client profile updated" });
+  } catch (err) {
+    console.error("PUT /api/admin/clients/:id error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.delete("/api/admin/clients/:id", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const client = await db.collection("profiles").findOne({ _id: new ObjectId(req.params.id), role: "client" });
+    if (!client) {
+      return res.status(404).json({ success: false, message: "Client not found" });
+    }
+    const clientId = req.params.id;
+    await Promise.all([
+      db.collection("profiles").deleteOne({ _id: client._id }),
+      db.collection("payments").deleteMany({ client_id: clientId }),
+      db.collection("timeline_events").deleteMany({ client_id: clientId }),
+      db.collection("meetings").deleteMany({ client_id: clientId }),
+      db.collection("verification_documents").deleteMany({ client_id: clientId }),
+      db.collection("project_documents").deleteMany({ client_id: clientId }),
+      db.collection("projects").deleteMany({ client_id: clientId }),
+      db.collection("milestones").deleteMany({ client_id: clientId }),
+      db.collection("change_requests").deleteMany({ client_id: clientId }),
+      db.collection("portal_messages").deleteMany({ client_id: clientId }),
+    ]);
+    res.json({ success: true, message: "Client deleted" });
+  } catch (err) {
+    console.error("DELETE /api/admin/clients/:id error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// ── Admin: payments ───────────────────────────────────────────────
+
+app.get("/api/admin/payments", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const filter = {};
+    if (req.query.clientId) filter.client_id = String(req.query.clientId);
+    if (req.query.status && PAYMENT_STATUSES.includes(req.query.status)) filter.status = req.query.status;
+    const payments = await db.collection("payments").find(filter).sort({ due_date: -1, created_at: -1 }).toArray();
+    const result = await Promise.all(payments.map(async (p) => {
+      const client = p.client_id ? await db.collection("profiles").findOne({ _id: new ObjectId(p.client_id) }).catch(() => null) : null;
+      return mapAdminPayment(p, client);
+    }));
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("GET /api/admin/payments error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/admin/payments", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const { clientId, title, amount, currency, status, dueDate, paidAt, notes } = req.body;
+    if (!clientId || !title || amount === undefined || amount === null) {
+      return res.status(400).json({ success: false, message: "Client, title, and amount are required" });
+    }
+    const numAmount = Number(amount);
+    if (!Number.isFinite(numAmount) || numAmount < 0) {
+      return res.status(400).json({ success: false, message: "Amount must be a positive number" });
+    }
+    const db = await getDb();
+    const client = await db.collection("profiles").findOne({ _id: new ObjectId(String(clientId)), role: "client" });
+    if (!client) {
+      return res.status(400).json({ success: false, message: "Select a valid client" });
+    }
+    const now = new Date().toISOString();
+    const doc = {
+      client_id: client._id.toString(),
+      title: String(title).trim(),
+      amount: numAmount,
+      currency: String(currency || "INR").trim().toUpperCase() || "INR",
+      status: PAYMENT_STATUSES.includes(status) ? status : "pending",
+      due_date: dueDate || null,
+      paid_at: status === "paid" ? (paidAt ? new Date(paidAt).toISOString() : now) : null,
+      notes: notes || null,
+      proofs: [],
+      created_at: now,
+      updated_at: now,
+    };
+    const result = await db.collection("payments").insertOne(doc);
+    res.status(201).json({ success: true, message: "Payment created", id: result.insertedId.toString(), payment: mapAdminPayment({ ...doc, _id: result.insertedId }, client) });
+  } catch (err) {
+    console.error("POST /api/admin/payments error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.put("/api/admin/payments/:id", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const { title, amount, currency, status, dueDate, paidAt, notes } = req.body;
+    if (!title || amount === undefined || amount === null || !PAYMENT_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: "Title, valid status, and amount are required" });
+    }
+    const db = await getDb();
+    const existing = await db.collection("payments").findOne({ _id: new ObjectId(req.params.id) });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Payment not found" });
+    }
+    const numAmount = Number(amount);
+    if (!Number.isFinite(numAmount) || numAmount < 0) {
+      return res.status(400).json({ success: false, message: "Amount must be a positive number" });
+    }
+    const update = {
+      title: String(title).trim(),
+      amount: numAmount,
+      currency: String(currency || "INR").trim().toUpperCase() || "INR",
+      status,
+      due_date: dueDate || null,
+      paid_at: status === "paid" ? (paidAt ? new Date(paidAt).toISOString() : new Date().toISOString()) : null,
+      notes: notes || null,
+      updated_at: new Date().toISOString(),
+    };
+    await db.collection("payments").updateOne({ _id: existing._id }, { $set: update });
+    res.json({ success: true, message: "Payment updated" });
+  } catch (err) {
+    console.error("PUT /api/admin/payments/:id error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/admin/payments/:id/cancel", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const result = await db.collection("payments").updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status: "cancelled", paid_at: null, updated_at: new Date().toISOString() } }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: "Payment not found" });
+    }
+    res.json({ success: true, message: "Payment cancelled" });
+  } catch (err) {
+    console.error("POST /api/admin/payments/:id/cancel error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// ── Admin: payment settings ────────────────────────────────────────
+
+app.get("/api/admin/payment-settings", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const settings = await db.collection("payment_settings").findOne({ _id: "default" }).catch(() => null);
+    res.json({ success: true, data: mapPaymentSettings(settings) });
+  } catch (err) {
+    console.error("GET /api/admin/payment-settings error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.put("/api/admin/payment-settings", authenticateToken, requireAdminRole, (req, res) => {
+  upload.single("qrCode")(req, res, async (err) => {
+    try {
+      if (err) {
+        if (err instanceof multer.MulterError) {
+          return res.status(400).json({ success: false, message: err.code === "LIMIT_FILE_SIZE" ? "File too large. Max 5MB." : err.message });
+        }
+        return res.status(400).json({ success: false, message: err.message });
+      }
+      const body = req.body || {};
+      const upiId = String(body.upiId || "").trim();
+      if (!upiId) {
+        return res.status(400).json({ success: false, message: "Enter a valid UPI ID" });
+      }
+      if (!(await isDbReady())) {
+        return res.status(503).json({ success: false, message: "Database not configured" });
+      }
+      const db = await getDb();
+      const existing = await db.collection("payment_settings").findOne({ _id: "default" }).catch(() => null);
+      const qrFile = req.file;
+      const now = new Date().toISOString();
+      const doc = {
+        _id: "default",
+        upi_id: upiId,
+        receiver_name: String(body.receiverName || "").trim() || null,
+        qr_code_path: qrFile ? `/uploads/${qrFile.filename}` : existing?.qr_code_path || null,
+        qr_code_url: qrFile ? `/uploads/${qrFile.filename}` : existing?.qr_code_url || null,
+        updated_at: now,
+      };
+      await db.collection("payment_settings").updateOne(
+        { _id: "default" },
+        { $set: { upi_id: doc.upi_id, receiver_name: doc.receiver_name, qr_code_path: doc.qr_code_path, qr_code_url: doc.qr_code_url, updated_at: now } },
+        { upsert: true }
+      );
+      res.json({ success: true, message: "Payment settings saved", data: mapPaymentSettings(doc) });
+    } catch (error) {
+      console.error("PUT /api/admin/payment-settings error:", error);
+      res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+});
+
+// ── Admin: meetings ────────────────────────────────────────────────
+
+app.get("/api/admin/meetings", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const meetings = await db.collection("meetings").find({}).sort({ scheduled_at: -1 }).toArray();
+    const result = await Promise.all(meetings.map(async (m) => {
+      const client = m.client_id ? await db.collection("profiles").findOne({ _id: new ObjectId(m.client_id) }).catch(() => null) : null;
+      return mapMeeting(m, client);
+    }));
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("GET /api/admin/meetings error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/admin/meetings", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const { clientId, title, date, time, durationMinutes, agenda, participants, meetingLink, status } = req.body;
+    if (!clientId || !title || !date || !time) {
+      return res.status(400).json({ success: false, message: "Client, title, date, and time are required" });
+    }
+    const db = await getDb();
+    const client = await db.collection("profiles").findOne({ _id: new ObjectId(String(clientId)), role: "client" });
+    if (!client) {
+      return res.status(400).json({ success: false, message: "Select a valid client" });
+    }
+    const scheduledAt = new Date(`${date}T${time}`).toISOString();
+    const doc = {
+      client_id: client._id.toString(),
+      title: String(title).trim(),
+      status: MEETING_STATUSES.includes(status) ? status : "upcoming",
+      scheduled_at: scheduledAt,
+      duration_minutes: Number(durationMinutes || 45),
+      agenda: String(agenda || ""),
+      participants: String(participants || ""),
+      meeting_link: String(meetingLink || ""),
+      created_at: new Date().toISOString(),
+    };
+    const result = await db.collection("meetings").insertOne(doc);
+    res.status(201).json({ success: true, message: "Meeting created", id: result.insertedId.toString(), meeting: mapMeeting({ ...doc, _id: result.insertedId }, client) });
+  } catch (err) {
+    console.error("POST /api/admin/meetings error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.put("/api/admin/meetings/:id/status", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const { status } = req.body;
+    if (!MEETING_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: "Invalid meeting status" });
+    }
+    const db = await getDb();
+    const result = await db.collection("meetings").updateOne(
+      { _id: new ObjectId(req.params.id) },
+      { $set: { status, updated_at: new Date().toISOString() } }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ success: false, message: "Meeting not found" });
+    }
+    res.json({ success: true, message: "Meeting status updated" });
+  } catch (err) {
+    console.error("PUT /api/admin/meetings/:id/status error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.delete("/api/admin/meetings/:id", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const result = await db.collection("meetings").deleteOne({ _id: new ObjectId(req.params.id) });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: "Meeting not found" });
+    }
+    res.json({ success: true, message: "Meeting deleted" });
+  } catch (err) {
+    console.error("DELETE /api/admin/meetings/:id error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// ── Admin: timeline events ─────────────────────────────────────────
+
+app.get("/api/admin/timeline", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const filter = {};
+    if (req.query.clientId) filter.client_id = String(req.query.clientId);
+    if (req.query.type && TIMELINE_TYPES.includes(req.query.type)) filter.type = req.query.type;
+    if (req.query.status && TIMELINE_STATUSES.includes(req.query.status)) filter.status = req.query.status;
+    const events = await db.collection("timeline_events").find(filter).sort({ event_date: -1, created_at: -1 }).toArray();
+    const result = await Promise.all(events.map(async (e) => {
+      const client = e.client_id ? await db.collection("profiles").findOne({ _id: new ObjectId(e.client_id) }).catch(() => null) : null;
+      return mapAdminTimelineEvent(e, client);
+    }));
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("GET /api/admin/timeline error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/admin/timeline", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const { clientId, title, description, type, status, eventDate, visibleToClient } = req.body;
+    if (!clientId || !title || !eventDate) {
+      return res.status(400).json({ success: false, message: "Client, title, and event date are required" });
+    }
+    const db = await getDb();
+    const client = await db.collection("profiles").findOne({ _id: new ObjectId(String(clientId)), role: "client" });
+    if (!client) {
+      return res.status(400).json({ success: false, message: "Select a valid client" });
+    }
+    const doc = {
+      client_id: client._id.toString(),
+      title: String(title).trim(),
+      description: description ? String(description).trim() : null,
+      type: TIMELINE_TYPES.includes(type) ? type : "update",
+      status: TIMELINE_STATUSES.includes(status) ? status : "upcoming",
+      event_date: new Date(String(eventDate)).toISOString(),
+      visible_to_client: Boolean(visibleToClient),
+      created_at: new Date().toISOString(),
+    };
+    const result = await db.collection("timeline_events").insertOne(doc);
+    res.status(201).json({ success: true, message: "Timeline event created", id: result.insertedId.toString(), event: mapAdminTimelineEvent({ ...doc, _id: result.insertedId }, client) });
+  } catch (err) {
+    console.error("POST /api/admin/timeline error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.put("/api/admin/timeline/:id", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const { clientId, title, description, type, status, eventDate, visibleToClient } = req.body;
+    if (!clientId || !title || !eventDate || !TIMELINE_TYPES.includes(type) || !TIMELINE_STATUSES.includes(status)) {
+      return res.status(400).json({ success: false, message: "Missing timeline event details" });
+    }
+    const db = await getDb();
+    const existing = await db.collection("timeline_events").findOne({ _id: new ObjectId(req.params.id) });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Timeline event not found" });
+    }
+    const update = {
+      client_id: String(clientId),
+      title: String(title).trim(),
+      description: description ? String(description).trim() : null,
+      type,
+      status,
+      event_date: new Date(String(eventDate)).toISOString(),
+      visible_to_client: Boolean(visibleToClient),
+      updated_at: new Date().toISOString(),
+    };
+    await db.collection("timeline_events").updateOne({ _id: existing._id }, { $set: update });
+    res.json({ success: true, message: "Timeline event updated" });
+  } catch (err) {
+    console.error("PUT /api/admin/timeline/:id error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.delete("/api/admin/timeline/:id", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const result = await db.collection("timeline_events").deleteOne({ _id: new ObjectId(req.params.id) });
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ success: false, message: "Timeline event not found" });
+    }
+    res.json({ success: true, message: "Timeline event deleted" });
+  } catch (err) {
+    console.error("DELETE /api/admin/timeline/:id error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// ── Admin: verification documents ──────────────────────────────────
+
+app.get("/api/admin/verification", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const documents = await db.collection("verification_documents").find({}).sort({ created_at: -1 }).toArray();
+    const result = await Promise.all(documents.map(async (d) => {
+      const client = d.client_id ? await db.collection("profiles").findOne({ _id: new ObjectId(d.client_id) }).catch(() => null) : null;
+      return mapVerificationDocument(d, client);
+    }));
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("GET /api/admin/verification error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/admin/verification/:id", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const { decision, rejectionReason } = req.body;
+    if (!["approved", "rejected"].includes(decision)) {
+      return res.status(400).json({ success: false, message: "Choose a valid verification action" });
+    }
+    if (decision === "rejected" && !String(rejectionReason || "").trim()) {
+      return res.status(400).json({ success: false, message: "Add a reason before rejecting a document" });
+    }
+    const db = await getDb();
+    const existing = await db.collection("verification_documents").findOne({ _id: new ObjectId(req.params.id) });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Document not found" });
+    }
+    await db.collection("verification_documents").updateOne(
+      { _id: existing._id },
+      {
+        $set: {
+          status: decision,
+          rejection_reason: decision === "rejected" ? String(rejectionReason).trim() : null,
+          verified_at: new Date().toISOString(),
+        },
+      }
+    );
+    res.json({ success: true, message: `Document ${decision}` });
+  } catch (err) {
+    console.error("POST /api/admin/verification/:id error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/admin/verification/approve-all", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const { clientId } = req.body;
+    if (!clientId) {
+      return res.status(400).json({ success: false, message: "Choose a client to approve documents for" });
+    }
+    const db = await getDb();
+    const result = await db.collection("verification_documents").updateMany(
+      { client_id: String(clientId), status: "pending" },
+      { $set: { status: "approved", rejection_reason: null, verified_at: new Date().toISOString() } }
+    );
+    if (result.matchedCount === 0) {
+      return res.status(400).json({ success: false, message: "This client has no pending documents to approve" });
+    }
+    res.json({ success: true, message: `${result.modifiedCount} document${result.modifiedCount === 1 ? "" : "s"} approved` });
+  } catch (err) {
+    console.error("POST /api/admin/verification/approve-all error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
   }
 });
 

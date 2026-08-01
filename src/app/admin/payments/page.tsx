@@ -1,33 +1,60 @@
-import Link from 'next/link';
+'use client';
+
+import { Link } from 'wouter';
 import { AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
 import { AdminPaymentsTable } from '@/components/admin/admin-payments-table';
-import { getAdminClients, getAdminPayments, getPaymentSettings, isPaymentStatus, paymentStatuses } from '@/lib/portal-data';
+import { fetchClients, fetchPayments, fetchPaymentSettings, paymentStatuses, type AdminClientRecord, type AdminPaymentRecord, type PaymentSettingsRecord, type PaymentStatus } from '@/lib/admin-portal-api';
 import { formatCurrency } from '@/lib/money';
-
-type SearchParams = Record<string, string | string[] | undefined>;
-
-function firstParam(params: SearchParams, key: string) {
-  const value = params[key];
-  return Array.isArray(value) ? value[0] : value;
-}
+import { useEffect, useState } from 'react';
 
 function inputClass(extra = '') {
   return `h-9 w-full rounded-[8px] border border-border bg-white px-3 text-sm text-text-primary outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 ${extra}`;
 }
 
-export default async function AdminPaymentsPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
-  const params = searchParams ? await searchParams : {};
-  const selectedClientId = firstParam(params, 'clientId') || '';
-  const selectedStatusInput = firstParam(params, 'status');
-  const selectedStatus = isPaymentStatus(selectedStatusInput) ? selectedStatusInput : undefined;
-  const message = firstParam(params, 'message');
-  const error = firstParam(params, 'error');
+export default function AdminPaymentsPage() {
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [clients, setClients] = useState<AdminClientRecord[]>([]);
+  const [payments, setPayments] = useState<AdminPaymentRecord[] | null>(null);
+  const [paymentSettings, setPaymentSettings] = useState<PaymentSettingsRecord | null>(null);
+  const [selectedClientId, setSelectedClientId] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState('');
 
-  const [clients, payments, paymentSettings] = await Promise.all([
-    getAdminClients(),
-    getAdminPayments({ clientId: selectedClientId || undefined, status: selectedStatus }),
-    getPaymentSettings(),
-  ]);
+  async function loadAll() {
+    try {
+      const [clientData, settingsData] = await Promise.all([fetchClients(), fetchPaymentSettings()]);
+      setClients(clientData);
+      setPaymentSettings(settingsData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load clients');
+    }
+  }
+
+  async function loadPayments() {
+    try {
+      const data = await fetchPayments({
+        clientId: selectedClientId || undefined,
+        status: (selectedStatus as PaymentStatus) || undefined,
+      });
+      setPayments(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load payments');
+      setPayments([]);
+    }
+  }
+
+  useEffect(() => {
+    loadAll();
+    loadPayments();
+  }, []);
+
+  useEffect(() => {
+    if (selectedClientId !== '' || selectedStatus !== '') {
+      loadPayments();
+    }
+  }, [selectedClientId, selectedStatus]);
+
+  if (payments === null || paymentSettings === null) return <div className="flex items-center justify-center h-64"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>;
 
   const paidTotal = payments.filter((payment) => payment.status === 'paid').reduce((sum, payment) => sum + payment.amount, 0);
   const pendingTotal = payments.filter((payment) => payment.status === 'pending').reduce((sum, payment) => sum + payment.amount, 0);
@@ -79,10 +106,10 @@ export default async function AdminPaymentsPage({ searchParams }: { searchParams
       </div>
 
       <section className="card p-4">
-        <form className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_180px_auto_auto]" method="get">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_180px_auto_auto]">
           <label className="space-y-1.5">
             <span className="text-xs font-medium text-text-secondary">Client</span>
-            <select name="clientId" defaultValue={selectedClientId} className={inputClass()}>
+            <select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} className={inputClass()}>
               <option value="">All clients</option>
               {clients.map((client) => (
                 <option key={client.id} value={client.id}>{client.fullName || client.email}</option>
@@ -91,21 +118,27 @@ export default async function AdminPaymentsPage({ searchParams }: { searchParams
           </label>
           <label className="space-y-1.5">
             <span className="text-xs font-medium text-text-secondary">Status</span>
-            <select name="status" defaultValue={selectedStatus ?? ''} className={inputClass()}>
+            <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)} className={inputClass()}>
               <option value="">All statuses</option>
               {paymentStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
             </select>
           </label>
-          <button type="submit" className="mt-auto inline-flex h-9 items-center justify-center rounded-[8px] bg-primary px-3.5 text-sm font-medium text-white hover:bg-primary-600">
+          <button type="button" onClick={loadPayments} className="mt-auto inline-flex h-9 items-center justify-center rounded-[8px] bg-primary px-3.5 text-sm font-medium text-white hover:bg-primary-600">
             Filter
           </button>
-          <Link href="/admin/payments" className="mt-auto inline-flex h-9 items-center justify-center rounded-[8px] border border-border bg-white px-3.5 text-sm font-medium text-text-secondary hover:bg-surface-tertiary">
+          <button type="button" onClick={() => { setSelectedClientId(''); setSelectedStatus(''); }} className="mt-auto inline-flex h-9 items-center justify-center rounded-[8px] border border-border bg-white px-3.5 text-sm font-medium text-text-secondary hover:bg-surface-tertiary">
             Reset
-          </Link>
-        </form>
+          </button>
+        </div>
       </section>
 
-      <AdminPaymentsTable payments={payments} clients={clients} paymentSettings={paymentSettings} />
+      <AdminPaymentsTable
+        payments={payments}
+        clients={clients}
+        paymentSettings={paymentSettings}
+        onMessage={(m, isError) => { setError(null); if (isError) setError(m); else setMessage(m); }}
+        onRefresh={loadPayments}
+      />
     </div>
   );
 }
