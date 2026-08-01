@@ -89,32 +89,40 @@ function Router() {
       <div
         style={{ background: "var(--belvo-bg)", minHeight: "100dvh", color: "var(--belvo-text-1)" }}
       >
-        <Switch>
-          <Route path="/admin/login" component={AdminLogin} />
-          <Route path="/admin/team">
-            {isAuthenticated() ? <AdminDashboard /> : <Redirect to="/admin/login" />}
-          </Route>
-          <Route path="/admin">
-            {isAuthenticated() ? (
-              <AdminShell>
-                <Switch>
-                  <Route path="/admin/dashboard" component={AdminDashboardPage} />
-                  <Route path="/admin/clients" component={AdminClientsPage} />
-                  <Route path="/admin/payments" component={AdminPaymentsPage} />
-                  <Route path="/admin/meetings" component={AdminMeetingsPage} />
-                  <Route path="/admin/timeline" component={AdminTimelinePage} />
-                  <Route path="/admin/verification" component={AdminVerificationPage} />
-                  <Route path="/admin/settings" component={AdminSettingsPage} />
-                  <Route>
-                    <Redirect to="/admin/dashboard" />
-                  </Route>
-                </Switch>
-              </AdminShell>
-            ) : (
-              <Redirect to="/admin/login" />
-            )}
-          </Route>
-        </Switch>
+        <Suspense
+          fallback={
+            <div style={{ padding: "24px", color: "var(--belvo-text-2)", fontFamily: "'Inter', sans-serif", fontSize: "0.85rem" }}>
+              Loading...
+            </div>
+          }
+        >
+          <Switch>
+            <Route path="/admin/login" component={AdminLogin} />
+            <Route path="/admin/team">
+              {isAuthenticated() ? <AdminDashboard /> : <Redirect to="/admin/login" />}
+            </Route>
+            <Route path="/admin">
+              {isAuthenticated() ? (
+                <AdminShell>
+                  <Switch>
+                    <Route path="/admin/dashboard" component={AdminDashboardPage} />
+                    <Route path="/admin/clients" component={AdminClientsPage} />
+                    <Route path="/admin/payments" component={AdminPaymentsPage} />
+                    <Route path="/admin/meetings" component={AdminMeetingsPage} />
+                    <Route path="/admin/timeline" component={AdminTimelinePage} />
+                    <Route path="/admin/verification" component={AdminVerificationPage} />
+                    <Route path="/admin/settings" component={AdminSettingsPage} />
+                    <Route>
+                      <Redirect to="/admin/dashboard" />
+                    </Route>
+                  </Switch>
+                </AdminShell>
+              ) : (
+                <Redirect to="/admin/login" />
+              )}
+            </Route>
+          </Switch>
+        </Suspense>
       </div>
     );
   }
@@ -124,13 +132,15 @@ function Router() {
       <div
         style={{ background: "#0a0a0f", minHeight: "100dvh", color: "var(--belvo-text-1)" }}
       >
-        <Switch>
-          <Route path="/intern/login" component={InternLogin} />
-          <Route path="/intern/checklist" component={InternChecklist} />
-          <Route path="/intern">
-            {isInternAuthenticated() ? <InternDashboard /> : <Redirect to="/intern/login" />}
-          </Route>
-        </Switch>
+        <Suspense fallback={null}>
+          <Switch>
+            <Route path="/intern/login" component={InternLogin} />
+            <Route path="/intern/checklist" component={InternChecklist} />
+            <Route path="/intern">
+              {isInternAuthenticated() ? <InternDashboard /> : <Redirect to="/intern/login" />}
+            </Route>
+          </Switch>
+        </Suspense>
       </div>
     );
   }
