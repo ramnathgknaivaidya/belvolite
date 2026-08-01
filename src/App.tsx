@@ -64,6 +64,10 @@ import AdminMeetingsPage from "@/app/admin/meetings/page";
 import AdminTimelinePage from "@/app/admin/timeline/page";
 import AdminVerificationPage from "@/app/admin/verification/page";
 import AdminSettingsPage from "@/app/admin/settings/page";
+import AdminChatPage from "@/app/admin/chat/page";
+import AdminDocumentsPage from "@/app/admin/documents/page";
+import AdminChangeRequestsPage from "@/app/admin/change-requests/page";
+import AdminMilestonesPage from "@/app/admin/milestones/page";
 
 const queryClient = new QueryClient();
 
@@ -118,6 +122,18 @@ function Router() {
             </Route>
             <Route path="/admin/verification">
               {isAuthenticated() ? <AdminShell><AdminVerificationPage /></AdminShell> : <Redirect to="/admin/login" />}
+            </Route>
+            <Route path="/admin/chat">
+              {isAuthenticated() ? <AdminShell><AdminChatPage /></AdminShell> : <Redirect to="/admin/login" />}
+            </Route>
+            <Route path="/admin/documents">
+              {isAuthenticated() ? <AdminShell><AdminDocumentsPage /></AdminShell> : <Redirect to="/admin/login" />}
+            </Route>
+            <Route path="/admin/change-requests">
+              {isAuthenticated() ? <AdminShell><AdminChangeRequestsPage /></AdminShell> : <Redirect to="/admin/login" />}
+            </Route>
+            <Route path="/admin/milestones">
+              {isAuthenticated() ? <AdminShell><AdminMilestonesPage /></AdminShell> : <Redirect to="/admin/login" />}
             </Route>
             <Route path="/admin/settings">
               {isAuthenticated() ? <AdminShell><AdminSettingsPage /></AdminShell> : <Redirect to="/admin/login" />}

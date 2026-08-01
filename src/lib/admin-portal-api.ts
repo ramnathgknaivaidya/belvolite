@@ -162,6 +162,76 @@ export interface AdminDashboardData {
   recentTimelineEvents: AdminTimelineEventRecord[];
 }
 
+export interface ChatThreadRecord {
+  clientId: string | null;
+  clientName: string;
+  clientEmail: string;
+  lastMessage: string;
+  lastMessageAt: string | null;
+  lastSenderRole: string;
+  messageCount: number;
+}
+
+export interface ChatMessageRecord {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderRole: string;
+  body: string;
+  createdAt: string | null;
+  attachmentUrl: string | null;
+  attachmentName: string | null;
+}
+
+export interface AdminDocumentRecord {
+  id: string;
+  clientId: string | null;
+  clientName: string;
+  clientEmail: string;
+  name: string;
+  type: string;
+  version: number;
+  projectId: string | null;
+  projectName: string | null;
+  milestoneTitle: string | null;
+  createdAt: string | null;
+  fileSize: number | null;
+  fileUrl: string | null;
+}
+
+export interface ChangeRequestRecord {
+  id: string;
+  clientId: string | null;
+  clientName: string;
+  clientEmail: string;
+  title: string;
+  status: 'pending' | 'approved' | 'rejected';
+  impact: string;
+  priority: string;
+  description: string;
+  estimatedCost: number;
+  timelineImpact: string | null;
+  projectName: string | null;
+  adminNote: string | null;
+  createdAt: string | null;
+}
+
+export interface MilestoneRecord {
+  id: string;
+  clientId: string | null;
+  clientName: string;
+  clientEmail: string;
+  projectId: string | null;
+  projectName: string | null;
+  title: string;
+  status: string;
+  description: string | null;
+  progress: number;
+  expectedDate: string | null;
+  completionDate: string | null;
+  deliverables: { id?: string; name: string; fileUrl?: string }[];
+}
+
 export const paymentStatuses: PaymentStatus[] = ['pending', 'paid', 'overdue', 'cancelled'];
 export const timelineEventTypes: TimelineEventType[] = ['milestone', 'meeting', 'payment', 'document', 'update'];
 export const timelineEventStatuses: TimelineEventStatus[] = ['upcoming', 'completed', 'cancelled'];
@@ -367,5 +437,84 @@ export async function approveClientDocuments(clientId: string): Promise<void> {
   await api('/api/admin/verification/approve-all', {
     method: 'POST',
     body: JSON.stringify({ clientId }),
+  });
+}
+
+// ── Chat ───────────────────────────────────────────────────────────
+
+export async function fetchChatThreads(): Promise<ChatThreadRecord[]> {
+  const data = await api<{ success: boolean; data: ChatThreadRecord[] }>('/api/admin/chat');
+  return data.data;
+}
+
+export async function fetchChatMessages(clientId: string): Promise<ChatMessageRecord[]> {
+  const data = await api<{ success: boolean; data: ChatMessageRecord[] }>(`/api/admin/chat/${encodeURIComponent(clientId)}`);
+  return data.data;
+}
+
+export async function sendAdminChatMessage(clientId: string, body: string): Promise<void> {
+  await api(`/api/admin/chat/${encodeURIComponent(clientId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  });
+}
+
+// ── Client documents ───────────────────────────────────────────────
+
+export async function fetchAdminDocuments(): Promise<AdminDocumentRecord[]> {
+  const data = await api<{ success: boolean; data: AdminDocumentRecord[] }>('/api/admin/documents');
+  return data.data;
+}
+
+// ── Change requests ────────────────────────────────────────────────
+
+export async function fetchChangeRequests(): Promise<ChangeRequestRecord[]> {
+  const data = await api<{ success: boolean; data: ChangeRequestRecord[] }>('/api/admin/change-requests');
+  return data.data;
+}
+
+export async function updateChangeRequest(id: string, status: ChangeRequestRecord['status'], adminNote?: string): Promise<void> {
+  await api(`/api/admin/change-requests/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ status, adminNote: adminNote || undefined }),
+  });
+}
+
+// ── Milestones ─────────────────────────────────────────────────────
+
+export async function fetchAdminMilestones(): Promise<MilestoneRecord[]> {
+  const data = await api<{ success: boolean; data: MilestoneRecord[] }>('/api/admin/milestones');
+  return data.data;
+}
+
+export async function createMilestone(milestone: {
+  clientId: string;
+  title: string;
+  projectId?: string | null;
+  projectName?: string | null;
+  description?: string | null;
+  status?: string;
+  progress?: number;
+  expectedDate?: string | null;
+}): Promise<void> {
+  await api('/api/admin/milestones', {
+    method: 'POST',
+    body: JSON.stringify(milestone),
+  });
+}
+
+export async function updateMilestone(
+  id: string,
+  milestone: {
+    title?: string;
+    description?: string | null;
+    status?: string;
+    progress?: number;
+    expectedDate?: string | null;
+  }
+): Promise<void> {
+  await api(`/api/admin/milestones/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(milestone),
   });
 }

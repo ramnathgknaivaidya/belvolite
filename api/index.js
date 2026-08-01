@@ -2198,6 +2198,297 @@ app.post("/api/admin/verification/:id", authenticateToken, requireAdminRole, asy
   }
 });
 
+// ── Admin: chat ────────────────────────────────────────────────────
+
+app.get("/api/admin/chat", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const threads = await db.collection("portal_messages").aggregate([
+      { $sort: { created_at: -1 } },
+      { $group: { _id: "$client_id", last: { $first: "$$ROOT" }, count: { $sum: 1 } } },
+    ]).toArray();
+    const result = await Promise.all(threads.map(async (t) => {
+      const client = t._id ? await db.collection("profiles").findOne({ _id: new ObjectId(t._id) }).catch(() => null) : null;
+      return {
+        clientId: t._id ? t._id.toString() : null,
+        clientName: adminClientLabel(client),
+        clientEmail: client?.email || "",
+        lastMessage: t.last?.body || "",
+        lastMessageAt: t.last?.created_at || null,
+        lastSenderRole: t.last?.sender_role || "client",
+        messageCount: t.count,
+      };
+    }));
+    result.sort((a, b) => String(b.lastMessageAt || "").localeCompare(String(a.lastMessageAt || "")));
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("GET /api/admin/chat error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.get("/api/admin/chat/:clientId", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const messages = await db.collection("portal_messages").find({ client_id: req.params.clientId }).sort({ created_at: 1 }).toArray();
+    const client = await db.collection("profiles").findOne({ _id: new ObjectId(req.params.clientId) }).catch(() => null);
+    res.json({ success: true, data: messages.map((m) => ({
+      id: m._id?.toString() || m.id,
+      senderId: m.sender_id || "admin",
+      senderName: m.sender_name || (m.sender_role === "admin" ? "Belvo Admin" : adminClientLabel(client)),
+      senderRole: m.sender_role || "client",
+      body: m.body || "",
+      createdAt: m.created_at || null,
+      attachmentUrl: m.attachment_url || null,
+      attachmentName: m.attachment_name || null,
+    })) });
+  } catch (err) {
+    console.error("GET /api/admin/chat/:clientId error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/admin/chat/:clientId", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    const { body } = req.body;
+    if (!body || !String(body).trim()) {
+      return res.status(400).json({ success: false, message: "Message body is required" });
+    }
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const client = await db.collection("profiles").findOne({ _id: new ObjectId(req.params.clientId) }).catch(() => null);
+    if (!client) {
+      return res.status(400).json({ success: false, message: "Select a valid client" });
+    }
+    const doc = {
+      client_id: req.params.clientId,
+      sender_id: "admin",
+      sender_name: req.user.username || "Belvo Admin",
+      sender_role: "admin",
+      body: String(body).trim(),
+      attachment_name: null,
+      attachment_url: null,
+      created_at: new Date().toISOString(),
+    };
+    await db.collection("portal_messages").insertOne(doc);
+    res.status(201).json({ success: true, message: "Message sent" });
+  } catch (err) {
+    console.error("POST /api/admin/chat/:clientId error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// ── Admin: client documents ────────────────────────────────────────
+
+app.get("/api/admin/documents", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const docs = await db.collection("project_documents").find({}).sort({ created_at: -1 }).toArray();
+    const result = await Promise.all(docs.map(async (d) => {
+      const client = d.client_id ? await db.collection("profiles").findOne({ _id: new ObjectId(d.client_id) }).catch(() => null) : null;
+      return {
+        id: d._id?.toString() || d.id,
+        clientId: d.client_id || null,
+        clientName: adminClientLabel(client),
+        clientEmail: client?.email || "",
+        name: d.name,
+        type: d.type || "other",
+        version: Number(d.version || 1),
+        projectId: d.project_id || null,
+        projectName: d.project_name || null,
+        milestoneTitle: d.milestone_title || null,
+        createdAt: d.created_at || null,
+        fileSize: d.file_size != null ? Number(d.file_size) : null,
+        fileUrl: d.file_url || d.external_url || null,
+      };
+    }));
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("GET /api/admin/documents error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// ── Admin: change requests ─────────────────────────────────────────
+
+app.get("/api/admin/change-requests", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const requests = await db.collection("change_requests").find({}).sort({ created_at: -1 }).toArray();
+    const result = await Promise.all(requests.map(async (c) => {
+      const client = c.client_id ? await db.collection("profiles").findOne({ _id: new ObjectId(c.client_id) }).catch(() => null) : null;
+      return {
+        id: c._id?.toString() || c.id,
+        clientId: c.client_id || null,
+        clientName: adminClientLabel(client),
+        clientEmail: client?.email || "",
+        title: c.title,
+        status: c.status || "pending",
+        impact: c.impact || "medium",
+        priority: c.priority || "medium",
+        description: c.description || "",
+        estimatedCost: Number(c.estimated_cost || 0),
+        timelineImpact: c.timeline_impact || null,
+        projectName: c.project_name || null,
+        adminNote: c.admin_note || null,
+        createdAt: c.created_at || null,
+      };
+    }));
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("GET /api/admin/change-requests error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.put("/api/admin/change-requests/:id", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    const { status, adminNote } = req.body;
+    if (!["pending", "approved", "rejected"].includes(status)) {
+      return res.status(400).json({ success: false, message: "Choose a valid status" });
+    }
+    if (status === "rejected" && !String(adminNote || "").trim()) {
+      return res.status(400).json({ success: false, message: "Add a note before rejecting a request" });
+    }
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const existing = await db.collection("change_requests").findOne({ _id: new ObjectId(req.params.id) });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Change request not found" });
+    }
+    await db.collection("change_requests").updateOne(
+      { _id: existing._id },
+      {
+        $set: {
+          status,
+          admin_note: adminNote ? String(adminNote).trim() : null,
+          updated_at: new Date().toISOString(),
+        },
+      }
+    );
+    res.json({ success: true, message: `Change request ${status}` });
+  } catch (err) {
+    console.error("PUT /api/admin/change-requests/:id error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// ── Admin: milestones ──────────────────────────────────────────────
+
+app.get("/api/admin/milestones", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const milestones = await db.collection("milestones").find({}).sort({ expected_date: 1 }).toArray();
+    const result = await Promise.all(milestones.map(async (m) => {
+      const client = m.client_id ? await db.collection("profiles").findOne({ _id: new ObjectId(m.client_id) }).catch(() => null) : null;
+      return {
+        id: m._id?.toString() || m.id,
+        clientId: m.client_id || null,
+        clientName: adminClientLabel(client),
+        clientEmail: client?.email || "",
+        projectId: m.project_id || null,
+        projectName: m.project_name || null,
+        title: m.title,
+        status: m.status || "not_started",
+        description: m.description || null,
+        progress: Number(m.progress || 0),
+        expectedDate: m.expected_date || null,
+        completionDate: m.completion_date || null,
+        deliverables: m.deliverables || [],
+      };
+    }));
+    res.json({ success: true, data: result });
+  } catch (err) {
+    console.error("GET /api/admin/milestones error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.post("/api/admin/milestones", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    const { clientId, title, projectId, projectName, description, status, progress, expectedDate } = req.body;
+    if (!clientId || !title) {
+      return res.status(400).json({ success: false, message: "Client and milestone title are required" });
+    }
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const client = await db.collection("profiles").findOne({ _id: new ObjectId(String(clientId)), role: "client" });
+    if (!client) {
+      return res.status(400).json({ success: false, message: "Select a valid client" });
+    }
+    const doc = {
+      client_id: client._id.toString(),
+      project_id: projectId || null,
+      project_name: projectName || null,
+      title: String(title).trim(),
+      description: description ? String(description).trim() : null,
+      status: status || "not_started",
+      progress: Number(progress || 0),
+      expected_date: expectedDate ? new Date(String(expectedDate)).toISOString() : null,
+      completion_date: null,
+      deliverables: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const result = await db.collection("milestones").insertOne(doc);
+    res.status(201).json({ success: true, message: "Milestone created", id: result.insertedId.toString() });
+  } catch (err) {
+    console.error("POST /api/admin/milestones error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.put("/api/admin/milestones/:id", authenticateToken, requireAdminRole, async (req, res) => {
+  try {
+    const { title, description, status, progress, expectedDate } = req.body;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const existing = await db.collection("milestones").findOne({ _id: new ObjectId(req.params.id) });
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Milestone not found" });
+    }
+    const set = {
+      title: title ? String(title).trim() : existing.title,
+      description: description !== undefined ? (description ? String(description).trim() : null) : existing.description,
+      status: status || existing.status,
+      progress: progress !== undefined ? Number(progress) : Number(existing.progress || 0),
+      expected_date: expectedDate ? new Date(String(expectedDate)).toISOString() : existing.expected_date,
+      updated_at: new Date().toISOString(),
+    };
+    if (set.status === "completed" && !existing.completion_date) {
+      set.completion_date = new Date().toISOString();
+    }
+    await db.collection("milestones").updateOne({ _id: existing._id }, { $set: set });
+    res.json({ success: true, message: "Milestone updated" });
+  } catch (err) {
+    console.error("PUT /api/admin/milestones/:id error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(500).json({ success: false, message: "Internal server error" });
