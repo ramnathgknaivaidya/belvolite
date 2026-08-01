@@ -8,9 +8,20 @@ import type { ClientPaymentRecord, PaymentSettingsRecord, PaymentStatusValue } f
 import { DEFAULT_CURRENCY, formatCompactCurrency, formatCurrency } from '@/lib/money';
 import { Drawer } from '@/components/ui/slide-panel';
 import { FormSubmitButton } from '@/components/ui/form-submit-button';
-async function uploadPaymentProofAction(formData: FormData) {
-  await new Promise(r => setTimeout(r, 500));
-  console.log('uploadPaymentProofAction', Object.fromEntries(formData));
+async function uploadPaymentProofAction(formData: FormData, setProofError: (value: string | null) => void) {
+  const paymentId = String(formData.get('paymentId') || '');
+  setProofError(null);
+  try {
+    const res = await fetch(`/api/client/payments/${paymentId}/proof`, { method: 'POST', body: formData });
+    const json = await res.json();
+    if (res.ok) {
+      window.location.reload();
+    } else {
+      setProofError(json.message || 'Failed to upload screenshot');
+    }
+  } catch {
+    setProofError('Network error. Please try again.');
+  }
 }
 
 type TabId = 'all' | PaymentStatusValue;
@@ -47,6 +58,7 @@ export function ClientPaymentsView({
   const [tab, setTab] = useState<TabId>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [payingId, setPayingId] = useState<string | null>(null);
+  const [proofError, setProofError] = useState<string | null>(null);
 
   const monthlyData = useMemo(() => {
     const grouped = payments.reduce<Record<string, MonthlyPaymentData>>((acc, payment) => {
@@ -287,7 +299,8 @@ export function ClientPaymentsView({
                     </div>
                   </div>
 
-                  <form action={uploadPaymentProofAction} className="block rounded-[8px] border border-dashed border-primary-300 bg-primary-50/60 p-4">
+                  {proofError && <p className="rounded-[8px] border border-danger/20 bg-danger-50 px-3 py-2 text-sm text-danger">{proofError}</p>}
+                  <form action={(formData) => uploadPaymentProofAction(formData, setProofError)} className="block rounded-[8px] border border-dashed border-primary-300 bg-primary-50/60 p-4">
                     <input type="hidden" name="paymentId" value={paymentInDrawer.id} />
                     <div className="flex items-start gap-3">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-white text-primary">

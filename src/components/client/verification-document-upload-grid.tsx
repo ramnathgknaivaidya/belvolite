@@ -32,7 +32,7 @@ function DocumentUploadBox({ type }: { type: DocumentType }) {
   return (
     <form action={uploadVerificationDocumentAction} className="rounded-[10px] border border-border bg-white p-4 shadow-sm">
       <input type="hidden" name="documentType" value={type.value} />
-      <input ref={inputRef} name="files" type="file" multiple accept="application/pdf,image/png,image/jpeg,image/webp" className="sr-only" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
+      <input ref={inputRef} name="files" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif" className="sr-only" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
@@ -44,7 +44,7 @@ function DocumentUploadBox({ type }: { type: DocumentType }) {
       </button>
       <div className="mt-3 flex min-h-9 items-center justify-between gap-3">
         <p className="line-clamp-2 text-xs text-text-secondary">
-          {files.length === 0 ? 'PDF, PNG, JPG, or WEBP - 10MB each' : `${files.length} file${files.length === 1 ? '' : 's'} selected`}
+          {files.length === 0 ? 'PNG, JPG, WEBP, or GIF - 5MB each' : `${files.length} file${files.length === 1 ? '' : 's'} selected`}
         </p>
         <UploadButton disabled={files.length === 0} />
       </div>

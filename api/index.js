@@ -919,6 +919,48 @@ app.get("/api/client/payments", authenticatePortal, async (req, res) => {
   }
 });
 
+app.post("/api/client/payments/:id/proof", authenticatePortal, (req, res) => {
+  upload.single("proof")(req, res, async (err) => {
+    try {
+      if (err) {
+        if (err instanceof multer.MulterError) {
+          return res.status(400).json({ success: false, message: err.code === "LIMIT_FILE_SIZE" ? "File too large. Max 5MB." : err.message });
+        }
+        return res.status(400).json({ success: false, message: err.message });
+      }
+      const file = req.file;
+      if (!file) {
+        return res.status(400).json({ success: false, message: "No file uploaded" });
+      }
+      if (!(await isDbReady())) {
+        return res.status(503).json({ success: false, message: "Database not configured" });
+      }
+      const db = await getDb();
+      const payment = await db.collection("payments").findOne({ _id: new ObjectId(req.params.id), client_id: req.user.userId });
+      if (!payment) {
+        return res.status(404).json({ success: false, message: "Payment not found" });
+      }
+      const proof = {
+        _id: new ObjectId(),
+        file_name: file.originalname,
+        file_path: `documents/${req.user.userId}/${file.filename}`,
+        file_url: `/uploads/${file.filename}`,
+        mime_type: file.mimetype,
+        file_size: file.size,
+        created_at: new Date().toISOString(),
+      };
+      await db.collection("payments").updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $push: { proofs: proof }, $set: { updated_at: new Date().toISOString() } }
+      );
+      res.status(201).json({ success: true, message: "Payment proof uploaded", proof: { id: proof._id.toString(), paymentId: payment._id.toString(), fileName: proof.file_name, filePath: proof.file_path, fileUrl: proof.file_url, mimeType: proof.mime_type, fileSize: proof.file_size, createdAt: proof.created_at } });
+    } catch (error) {
+      console.error("POST /api/client/payments/:id/proof error:", error);
+      res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+});
+
 app.get("/api/client/chat", authenticatePortal, async (req, res) => {
   try {
     if (!requireClient(req, res)) return;

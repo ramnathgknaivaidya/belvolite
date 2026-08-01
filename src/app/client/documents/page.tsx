@@ -123,7 +123,7 @@ export default function DocumentsPage() {
           </div>
           <div>
             <h2 className="text-base font-semibold text-text-primary">Upload Document</h2>
-            <p className="text-sm text-text-secondary">PDF, PNG, JPG, WEBP, or MP4 up to 20MB.</p>
+            <p className="text-sm text-text-secondary">PNG, JPG, WEBP, or GIF up to 5MB.</p>
           </div>
         </div>
 
@@ -156,7 +156,7 @@ export default function DocumentsPage() {
           </label>
           <label className="space-y-1.5 lg:col-span-3">
             <span className="text-xs font-medium text-text-secondary">File</span>
-            <input name="file" required type="file" accept="application/pdf,image/png,image/jpeg,image/webp,video/mp4" className="block w-full text-sm text-text-secondary file:mr-3 file:rounded-[8px] file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white" />
+            <input name="file" required type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="block w-full text-sm text-text-secondary file:mr-3 file:rounded-[8px] file:border-0 file:bg-primary file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white" />
           </label>
           <div className="flex items-end">
             <FormSubmitButton pendingLabel="Uploading..." className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-[8px] bg-primary px-4 text-sm font-semibold text-white hover:bg-primary-600 disabled:cursor-not-allowed disabled:opacity-60">
