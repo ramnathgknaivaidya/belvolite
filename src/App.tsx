@@ -101,25 +101,29 @@ function Router() {
             <Route path="/admin/team">
               {isAuthenticated() ? <AdminDashboard /> : <Redirect to="/admin/login" />}
             </Route>
+            <Route path="/admin/dashboard">
+              {isAuthenticated() ? <AdminShell><AdminDashboardPage /></AdminShell> : <Redirect to="/admin/login" />}
+            </Route>
+            <Route path="/admin/clients">
+              {isAuthenticated() ? <AdminShell><AdminClientsPage /></AdminShell> : <Redirect to="/admin/login" />}
+            </Route>
+            <Route path="/admin/payments">
+              {isAuthenticated() ? <AdminShell><AdminPaymentsPage /></AdminShell> : <Redirect to="/admin/login" />}
+            </Route>
+            <Route path="/admin/meetings">
+              {isAuthenticated() ? <AdminShell><AdminMeetingsPage /></AdminShell> : <Redirect to="/admin/login" />}
+            </Route>
+            <Route path="/admin/timeline">
+              {isAuthenticated() ? <AdminShell><AdminTimelinePage /></AdminShell> : <Redirect to="/admin/login" />}
+            </Route>
+            <Route path="/admin/verification">
+              {isAuthenticated() ? <AdminShell><AdminVerificationPage /></AdminShell> : <Redirect to="/admin/login" />}
+            </Route>
+            <Route path="/admin/settings">
+              {isAuthenticated() ? <AdminShell><AdminSettingsPage /></AdminShell> : <Redirect to="/admin/login" />}
+            </Route>
             <Route path="/admin">
-              {isAuthenticated() ? (
-                <AdminShell>
-                  <Switch>
-                    <Route path="/admin/dashboard" component={AdminDashboardPage} />
-                    <Route path="/admin/clients" component={AdminClientsPage} />
-                    <Route path="/admin/payments" component={AdminPaymentsPage} />
-                    <Route path="/admin/meetings" component={AdminMeetingsPage} />
-                    <Route path="/admin/timeline" component={AdminTimelinePage} />
-                    <Route path="/admin/verification" component={AdminVerificationPage} />
-                    <Route path="/admin/settings" component={AdminSettingsPage} />
-                    <Route>
-                      <Redirect to="/admin/dashboard" />
-                    </Route>
-                  </Switch>
-                </AdminShell>
-              ) : (
-                <Redirect to="/admin/login" />
-              )}
+              <Redirect to={isAuthenticated() ? "/admin/dashboard" : "/admin/login"} />
             </Route>
           </Switch>
         </Suspense>
