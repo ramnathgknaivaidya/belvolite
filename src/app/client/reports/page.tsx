@@ -16,46 +16,27 @@ function statusLabel(status: string) {
   return status.replaceAll('_', ' ');
 }
 
-const MOCK_DATA = {
+const EMPTY_DATA = {
   projects: {
-    totalBudget: 5000000,
-    totalSpent: 3200000,
-    total: 2,
-    averageProgress: 72,
-    active: 1,
-    completed: 1,
+    totalBudget: 0,
+    totalSpent: 0,
+    total: 0,
+    averageProgress: 0,
+    active: 0,
+    completed: 0,
   },
   payments: {
-    paid: 2500000,
-    outstanding: 700000,
-    overdueCount: 1,
+    paid: 0,
+    outstanding: 0,
+    overdueCount: 0,
   },
   changeRequests: {
-    total: 5,
-    pending: 2,
-    approved: 2,
-    rejected: 1,
+    total: 0,
+    pending: 0,
+    approved: 0,
+    rejected: 0,
   },
-  projectRows: [
-    {
-      id: 'mock-proj-1',
-      name: 'Website Redesign',
-      status: 'in_progress',
-      health: 'good',
-      progress: 75,
-      budget: 3000000,
-      spent: 2100000,
-    },
-    {
-      id: 'mock-proj-2',
-      name: 'Mobile App',
-      status: 'completed',
-      health: 'warning',
-      progress: 100,
-      budget: 2000000,
-      spent: 1900000,
-    },
-  ],
+  projectRows: [],
 };
 
 export default function ReportsPage() {
@@ -67,13 +48,13 @@ export default function ReportsPage() {
         const res = await fetch('/api/client/reports');
         if (res.ok) {
           const json = await res.json();
-          setData(json.data || MOCK_DATA);
+          setData(json.data || EMPTY_DATA);
           return;
         }
       } catch {
-        // fall through to mock
+        // leave empty on error
       }
-      setData(MOCK_DATA);
+      setData(EMPTY_DATA);
     }
     fetchData();
   }, []);

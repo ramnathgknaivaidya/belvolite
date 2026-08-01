@@ -59,37 +59,22 @@ export default function DocumentsPage() {
   const [milestones, setMilestones] = useState<MilestoneRecord[]>([]);
 
   useEffect(() => {
-    const mockDocuments: ProjectDocumentRecord[] = [
-      { id: 'mock-doc-1', name: 'Project Proposal.pdf', type: 'deliverable', version: 1, projectId: 'mock-proj-1', projectName: 'Website Redesign', milestoneTitle: 'Design Phase', createdAt: '2026-07-20T10:00:00.000Z', fileSize: 245760, fileUrl: 'https://example.com/proposal.pdf' },
-      { id: 'mock-doc-2', name: 'Invoice_June2026.pdf', type: 'invoice', version: 2, projectId: 'mock-proj-1', projectName: 'Website Redesign', milestoneTitle: null, createdAt: '2026-07-01T08:30:00.000Z', fileSize: 102400, fileUrl: 'https://example.com/invoice.pdf' },
-      { id: 'mock-doc-3', name: 'Screenshot_Design.png', type: 'image', version: 1, projectId: null, projectName: null, milestoneTitle: null, createdAt: '2026-06-15T14:00:00.000Z', fileSize: 512000, fileUrl: 'https://example.com/screenshot.png' },
-    ];
-    const mockProjects: ProjectRecord[] = [
-      { id: 'mock-proj-1', name: 'Website Redesign' },
-    ];
-    const mockMilestones: MilestoneRecord[] = [
-      { id: 'mock-milestone-1', title: 'Design Phase' },
-      { id: 'mock-milestone-2', title: 'Development Phase' },
-    ];
-
     async function fetchData() {
       try {
         const res = await fetch('/api/client/documents');
         if (res.ok) {
           const json = await res.json();
-          const realDocs = json.data || [];
-          const realProjects = json.projects || [];
-          setDocuments(realDocs.length > 0 ? realDocs : mockDocuments);
-          setProjects(realProjects.length > 0 ? realProjects : mockProjects);
-          setMilestones(mockMilestones);
+          setDocuments(Array.isArray(json.data) ? json.data : []);
+          setProjects(Array.isArray(json.projects) ? json.projects : []);
+          setMilestones([]);
           return;
         }
       } catch {
-        // fall through to mock
+        // leave empty on error
       }
-      setDocuments(mockDocuments);
-      setProjects(mockProjects);
-      setMilestones(mockMilestones);
+      setDocuments([]);
+      setProjects([]);
+      setMilestones([]);
     }
     fetchData();
   }, []);
