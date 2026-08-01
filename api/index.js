@@ -9,6 +9,8 @@ import multer from "multer";
 import nodemailer from "nodemailer";
 import rateLimit from "express-rate-limit";
 import path from "path";
+import os from "os";
+import fs from "fs";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -26,14 +28,14 @@ app.use(cors());
 app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "..", "uploads")));
 
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, "..", "uploads"),
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `member-${uniqueSuffix}${ext}`);
-  },
-});
+const isVercel = !!process.env.VERCEL;
+const uploadsDir = isVercel ? path.join(os.tmpdir(), "uploads") : path.join(__dirname, "..", "uploads");
+
+try {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+} catch (err) {
+  console.warn("Could not create uploads dir, uploads may not persist:", err.message);
+}
 
 const fileFilter = (req, file, cb) => {
   const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -43,6 +45,15 @@ const fileFilter = (req, file, cb) => {
     cb(new Error("Only JPEG, PNG, WebP, and GIF images are allowed"), false);
   }
 };
+
+const storage = multer.diskStorage({
+  destination: uploadsDir,
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    cb(null, `member-${uniqueSuffix}${ext}`);
+  },
+});
 
 const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
 
