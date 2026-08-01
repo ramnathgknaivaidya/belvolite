@@ -16,52 +16,66 @@ function statusLabel(status: string) {
   return status.replaceAll('_', ' ');
 }
 
+const MOCK_DATA = {
+  projects: {
+    totalBudget: 5000000,
+    totalSpent: 3200000,
+    total: 2,
+    averageProgress: 72,
+    active: 1,
+    completed: 1,
+  },
+  payments: {
+    paid: 2500000,
+    outstanding: 700000,
+    overdueCount: 1,
+  },
+  changeRequests: {
+    total: 5,
+    pending: 2,
+    approved: 2,
+    rejected: 1,
+  },
+  projectRows: [
+    {
+      id: 'mock-proj-1',
+      name: 'Website Redesign',
+      status: 'in_progress',
+      health: 'good',
+      progress: 75,
+      budget: 3000000,
+      spent: 2100000,
+    },
+    {
+      id: 'mock-proj-2',
+      name: 'Mobile App',
+      status: 'completed',
+      health: 'warning',
+      progress: 100,
+      budget: 2000000,
+      spent: 1900000,
+    },
+  ],
+};
+
 export default function ReportsPage() {
   const [data, setData] = useState<any>(null);
 
   useEffect(() => {
-    const mockData = {
-      projects: {
-        totalBudget: 5000000,
-        totalSpent: 3200000,
-        total: 2,
-        averageProgress: 72,
-        active: 1,
-        completed: 1,
-      },
-      payments: {
-        paid: 2500000,
-        outstanding: 700000,
-        overdueCount: 1,
-      },
-      changeRequests: {
-        total: 5,
-        pending: 2,
-        approved: 2,
-        rejected: 1,
-      },
-      projectRows: [
-        {
-          id: 'mock-proj-1',
-          name: 'Website Redesign',
-          status: 'in_progress',
-          health: 'good',
-          progress: 75,
-          budget: 3000000,
-          spent: 2100000,
-        },
-        {
-          id: 'mock-proj-2',
-          name: 'Mobile App',
-          status: 'completed',
-          health: 'warning',
-          progress: 100,
-          budget: 2000000,
-          spent: 1900000,
-        },
-      ],
-    };
-    setData(mockData);
+    async function fetchData() {
+      try {
+        const res = await fetch('/api/client/reports');
+        if (res.ok) {
+          const json = await res.json();
+          setData(json.data || MOCK_DATA);
+          return;
+        }
+      } catch {
+        // fall through to mock
+      }
+      setData(MOCK_DATA);
+    }
+    fetchData();
   }, []);
 
   if (!data) {

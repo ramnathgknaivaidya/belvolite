@@ -71,9 +71,27 @@ export default function DocumentsPage() {
       { id: 'mock-milestone-1', title: 'Design Phase' },
       { id: 'mock-milestone-2', title: 'Development Phase' },
     ];
-    setDocuments(mockDocuments);
-    setProjects(mockProjects);
-    setMilestones(mockMilestones);
+
+    async function fetchData() {
+      try {
+        const res = await fetch('/api/client/documents');
+        if (res.ok) {
+          const json = await res.json();
+          const realDocs = json.data || [];
+          const realProjects = json.projects || [];
+          setDocuments(realDocs.length > 0 ? realDocs : mockDocuments);
+          setProjects(realProjects.length > 0 ? realProjects : mockProjects);
+          setMilestones(mockMilestones);
+          return;
+        }
+      } catch {
+        // fall through to mock
+      }
+      setDocuments(mockDocuments);
+      setProjects(mockProjects);
+      setMilestones(mockMilestones);
+    }
+    fetchData();
   }, []);
 
   return (

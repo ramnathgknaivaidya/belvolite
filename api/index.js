@@ -576,6 +576,44 @@ app.post("/api/upload", authenticateToken, (req, res) => {
   });
 });
 
+app.post("/api/upload/verification", authenticatePortal, (req, res) => {
+  upload.array("files", 10)(req, res, async (err) => {
+    try {
+      if (err) {
+        if (err instanceof multer.MulterError) {
+          return res.status(400).json({ success: false, message: err.code === "LIMIT_FILE_SIZE" ? "File too large. Max 5MB per file." : err.message });
+        }
+        return res.status(400).json({ success: false, message: err.message });
+      }
+      const files = req.files || [];
+      if (files.length === 0) {
+        return res.status(400).json({ success: false, message: "No files uploaded" });
+      }
+      const documentType = String(req.body?.documentType || "other");
+      const now = new Date().toISOString();
+      const docs = files.map((file) => ({
+        client_id: req.user.userId,
+        document_type: documentType,
+        status: "pending",
+        file_name: file.originalname,
+        file_path: `verification/${req.user.userId}/${file.filename}`,
+        file_url: `/uploads/${file.filename}`,
+        mime_type: file.mimetype,
+        file_size: file.size,
+        created_at: now,
+      }));
+      if (await isDbReady()) {
+        const db = await getDb();
+        await db.collection("verification_documents").insertMany(docs);
+      }
+      res.status(201).json({ success: true, count: files.length, message: "Documents uploaded for review" });
+    } catch (error) {
+      console.error("POST /api/upload/verification error:", error);
+      res.status(500).json({ success: false, message: "Internal server error" });
+    }
+  });
+});
+
 function parseCookies(req) {
   const cookieHeader = req.headers?.cookie;
   if (!cookieHeader) return {};
@@ -816,6 +854,143 @@ app.get("/api/client/timeline", authenticatePortal, async (req, res) => {
     })) });
   } catch (err) {
     console.error("GET /api/client/timeline error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.get("/api/client/documents", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const docs = await db.collection("project_documents").find({ client_id: req.user.userId, visible_to_client: true }).sort({ created_at: -1 }).toArray();
+    const projects = await db.collection("projects").find({ client_id: req.user.userId }).sort({ created_at: -1 }).toArray();
+    res.json({ success: true, data: docs.map(d => ({
+      id: d._id?.toString() || d.id,
+      name: d.name,
+      type: d.type || "other",
+      version: Number(d.version || 1),
+      projectId: d.project_id || null,
+      projectName: d.project_name || null,
+      milestoneTitle: d.milestone_title || null,
+      createdAt: d.created_at || null,
+      fileSize: d.file_size != null ? Number(d.file_size) : null,
+      fileUrl: d.file_url || d.external_url || null,
+    })), projects: projects.map(p => ({ id: p._id?.toString() || p.id, name: p.name })) });
+  } catch (err) {
+    console.error("GET /api/client/documents error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.get("/api/client/payments", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const payments = await db.collection("payments").find({ client_id: req.user.userId }).sort({ due_date: -1, created_at: -1 }).toArray();
+    const settings = await db.collection("payment_settings").findOne({ _id: "default" }).catch(() => null);
+    res.json({ success: true, payments: payments.map(p => ({
+      id: p._id?.toString() || p.id,
+      clientId: p.client_id || req.user.userId,
+      title: p.title || p.invoice_number || "Payment",
+      amount: Number(p.amount || 0),
+      currency: p.currency || "INR",
+      status: p.status || "pending",
+      dueDate: p.due_date || p.dueDate || null,
+      paidAt: p.paid_at || null,
+      notes: p.notes || null,
+      createdAt: p.created_at || null,
+      proofs: (p.proofs || []).map(pr => ({ id: pr._id?.toString() || pr.id || `proof-${Math.random().toString(36).slice(2)}`, paymentId: p._id?.toString() || p.id, fileName: pr.file_name || pr.fileName || "proof", filePath: pr.file_path || null, fileUrl: pr.file_url || null, mimeType: pr.mime_type || null, fileSize: pr.file_size != null ? Number(pr.file_size) : null, createdAt: pr.created_at || null })),
+    })), settings: {
+      upiId: settings?.upi_id || settings?.upiId || null,
+      receiverName: settings?.receiver_name || settings?.receiverName || null,
+      qrCodePath: settings?.qr_code_path || settings?.qrCodePath || null,
+      qrCodeUrl: settings?.qr_code_url || settings?.qrCodeUrl || null,
+      updatedAt: settings?.updated_at || settings?.updatedAt || null,
+    } });
+  } catch (err) {
+    console.error("GET /api/client/payments error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.get("/api/client/chat", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const messages = await db.collection("portal_messages").find({ client_id: req.user.userId }).sort({ created_at: 1 }).toArray();
+    const profile = await db.collection("profiles").findOne({ _id: { $in: messages.map(m => m.sender_id).filter(Boolean) } });
+    res.json({ success: true, data: messages.map(m => ({
+      id: m._id?.toString() || m.id,
+      senderId: m.sender_id || req.user.userId,
+      senderName: m.sender_name || (m.sender_id === req.user.userId ? (req.user.fullName || "You") : (profile?.full_name || "Admin")),
+      body: m.body || "",
+      createdAt: m.created_at || null,
+      attachmentUrl: m.attachment_url || null,
+      attachmentName: m.attachment_name || null,
+    })) });
+  } catch (err) {
+    console.error("GET /api/client/chat error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+app.get("/api/client/reports", authenticatePortal, async (req, res) => {
+  try {
+    if (!requireClient(req, res)) return;
+    if (!(await isDbReady())) {
+      return res.status(503).json({ success: false, message: "Database not configured" });
+    }
+    const db = await getDb();
+    const [projects, payments, changes] = await Promise.all([
+      db.collection("projects").find({ client_id: req.user.userId, visible_to_client: true }).toArray(),
+      db.collection("payments").find({ client_id: req.user.userId }).toArray(),
+      db.collection("change_requests").find({ client_id: req.user.userId }).toArray(),
+    ]);
+    const activeProjects = projects.filter(p => p.status === "active" || p.status === "on_hold");
+    const completedProjects = projects.filter(p => p.status === "completed");
+    const paidPayments = payments.filter(p => p.status === "paid");
+    const outstandingPayments = payments.filter(p => p.status === "pending" || p.status === "overdue");
+    res.json({ success: true, data: {
+      projects: {
+        total: projects.length,
+        active: activeProjects.length,
+        completed: completedProjects.length,
+        averageProgress: projects.length === 0 ? 0 : Math.round(projects.reduce((sum, p) => sum + Number(p.progress || 0), 0) / projects.length),
+        totalBudget: projects.reduce((sum, p) => sum + Number(p.budget || 0), 0),
+        totalSpent: projects.reduce((sum, p) => sum + Number(p.spent || 0), 0),
+      },
+      payments: {
+        paid: paidPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0),
+        outstanding: outstandingPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0),
+        overdueCount: payments.filter(p => p.status === "overdue").length,
+      },
+      changeRequests: {
+        total: changes.length,
+        pending: changes.filter(c => c.status === "pending").length,
+        approved: changes.filter(c => c.status === "approved").length,
+        rejected: changes.filter(c => c.status === "rejected").length,
+      },
+      projectRows: projects.map(p => ({
+        id: p._id?.toString() || p.id,
+        name: p.name,
+        status: p.status || "not_started",
+        health: p.health || "good",
+        progress: Number(p.progress || 0),
+        budget: Number(p.budget || 0),
+        spent: Number(p.spent || 0),
+      })),
+    } });
+  } catch (err) {
+    console.error("GET /api/client/reports error:", err);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 });

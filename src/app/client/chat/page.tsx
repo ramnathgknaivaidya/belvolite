@@ -24,53 +24,74 @@ interface PortalMessage {
   attachmentName: string | null;
 }
 
+const MOCK_MESSAGES: PortalMessage[] = [
+  {
+    id: 'mock-msg-1',
+    senderId: 'mock-client-id',
+    senderName: 'Rahul Sharma',
+    body: 'Hi team, I wanted to check the status of the homepage design.',
+    createdAt: '2026-07-27T10:30:00.000Z',
+    attachmentUrl: null,
+    attachmentName: null,
+  },
+  {
+    id: 'mock-msg-2',
+    senderId: 'admin-1',
+    senderName: 'Admin Belvo',
+    body: 'Hi Rahul, the homepage design is in review. We will share the final mockup by Friday.',
+    createdAt: '2026-07-27T11:00:00.000Z',
+    attachmentUrl: null,
+    attachmentName: null,
+  },
+  {
+    id: 'mock-msg-3',
+    senderId: 'mock-client-id',
+    senderName: 'Rahul Sharma',
+    body: 'Thanks! Please also send the updated timeline.',
+    createdAt: '2026-07-27T11:15:00.000Z',
+    attachmentUrl: 'https://example.com/timeline.pdf',
+    attachmentName: 'timeline.pdf',
+  },
+  {
+    id: 'mock-msg-4',
+    senderId: 'admin-1',
+    senderName: 'Admin Belvo',
+    body: 'Sure, attached is the revised timeline with the new milestones.',
+    createdAt: '2026-07-27T12:00:00.000Z',
+    attachmentUrl: 'https://example.com/revised-timeline.pdf',
+    attachmentName: 'revised-timeline.pdf',
+  },
+];
+
 export default function ChatPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [messages, setMessages] = useState<PortalMessage[]>([]);
-  const user = { id: 'mock-client-id' };
+  const [messages, setMessages] = useState<PortalMessage[] | null>(null);
+  const [user, setUser] = useState({ id: 'mock-client-id' });
 
   useEffect(() => {
-    const mockMessages: PortalMessage[] = [
-      {
-        id: 'mock-msg-1',
-        senderId: 'mock-client-id',
-        senderName: 'Rahul Sharma',
-        body: 'Hi team, I wanted to check the status of the homepage design.',
-        createdAt: '2026-07-27T10:30:00.000Z',
-        attachmentUrl: null,
-        attachmentName: null,
-      },
-      {
-        id: 'mock-msg-2',
-        senderId: 'admin-1',
-        senderName: 'Admin Belvo',
-        body: 'Hi Rahul, the homepage design is in review. We will share the final mockup by Friday.',
-        createdAt: '2026-07-27T11:00:00.000Z',
-        attachmentUrl: null,
-        attachmentName: null,
-      },
-      {
-        id: 'mock-msg-3',
-        senderId: 'mock-client-id',
-        senderName: 'Rahul Sharma',
-        body: 'Thanks! Please also send the updated timeline.',
-        createdAt: '2026-07-27T11:15:00.000Z',
-        attachmentUrl: 'https://example.com/timeline.pdf',
-        attachmentName: 'timeline.pdf',
-      },
-      {
-        id: 'mock-msg-4',
-        senderId: 'admin-1',
-        senderName: 'Admin Belvo',
-        body: 'Sure, attached is the revised timeline with the new milestones.',
-        createdAt: '2026-07-27T12:00:00.000Z',
-        attachmentUrl: 'https://example.com/revised-timeline.pdf',
-        attachmentName: 'revised-timeline.pdf',
-      },
-    ];
-    setMessages(mockMessages);
+    async function fetchData() {
+      try {
+        const [meRes, chatRes] = await Promise.all([
+          fetch('/api/auth/me'),
+          fetch('/api/client/chat'),
+        ]);
+        const me = await meRes.json();
+        if (me?.user?.id) setUser({ id: me.user.id });
+        if (chatRes.ok) {
+          const json = await chatRes.json();
+          setMessages(json.data && json.data.length > 0 ? json.data : MOCK_MESSAGES);
+          return;
+        }
+      } catch {
+        // fall through to mock
+      }
+      setMessages(MOCK_MESSAGES);
+    }
+    fetchData();
   }, []);
+
+  if (!messages) return <div className="flex items-center justify-center h-64"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>;
 
   return (
     <div className="animate-fade-in space-y-5">
