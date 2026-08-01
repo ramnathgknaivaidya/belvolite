@@ -218,7 +218,10 @@ function Router() {
 }
 
 function App() {
-  const [showSplash, setShowSplash] = useState(true);
+  const [showSplash, setShowSplash] = useState(() => {
+    const path = window.location.pathname;
+    return !(path.startsWith("/admin") || path.startsWith("/client") || path.startsWith("/intern"));
+  });
 
   return (
     <>

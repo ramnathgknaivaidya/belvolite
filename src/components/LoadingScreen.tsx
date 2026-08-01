@@ -59,18 +59,35 @@ export default function LoadingScreen({ onComplete }: LoadingScreenProps) {
     }
 
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) {
+      doneRef.current();
+      return;
+    }
+
+    // Hard fallback so the black overlay can never block the app.
+    const hardFallback = window.setTimeout(() => {
+      setPhase("hidden");
+      doneRef.current();
+    }, 5000);
 
     const w = innerWidth;
     const h = innerHeight;
     const isMobile = w < 768;
     const sf = Math.min(1, Math.max(0.5, w / 1200));
 
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
+    } catch {
+      window.clearTimeout(hardFallback);
+      setPhase("hidden");
+      doneRef.current();
+      return;
+    }
+
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100);
     camera.position.z = isMobile ? 6 : 4.5;
-
-    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
     renderer.setSize(w, h);
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     renderer.setClearColor(0x000000, 0);
@@ -262,6 +279,7 @@ export default function LoadingScreen({ onComplete }: LoadingScreenProps) {
     const t2 = setTimeout(() => setPhase("exit"), 3800);
     const t3 = setTimeout(() => {
       setPhase("hidden");
+      window.clearTimeout(hardFallback);
       doneRef.current();
     }, 4200);
 
@@ -276,6 +294,7 @@ export default function LoadingScreen({ onComplete }: LoadingScreenProps) {
     addEventListener("resize", onResize);
 
     return () => {
+      window.clearTimeout(hardFallback);
       cancelAnimationFrame(animId);
       removeEventListener("resize", onResize);
       renderer.dispose();
