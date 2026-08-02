@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3001";
+const API_BASE = import.meta.env.VITE_API_URL || "";
 const TOKEN_KEY = "belvo_intern_token";
 const EMAIL_KEY = "belvo_intern_email";
 

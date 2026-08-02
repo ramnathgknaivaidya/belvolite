@@ -275,7 +275,7 @@ export default function InternChecklist() {
 
   const handleProceed = async () => {
     try {
-      await fetch("http://localhost:3001/intern/submit-onboarding", {
+      await fetch("/intern/submit-onboarding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
